@@ -8,6 +8,8 @@ export class GameScene extends Phaser.Scene {
   create() {
     this.backgroundGraphics = this.add.graphics()
     this.gridGraphics = this.add.graphics()
+    this.backgroundGraphics.setDepth(0)
+    this.gridGraphics.setDepth(3)
     this.board = this.createEmptyBoard()
     this.cells = []
     this.marks = []
@@ -18,6 +20,9 @@ export class GameScene extends Phaser.Scene {
     this.teamAnswers = this.createTeamAnswerState()
     this.answerStatusLabels = {}
     this.questionTimerEvent = null
+    this.questionModal = null
+    this.questionTimerText = null
+    this.matchEndOverlay = null
     this.questionTimeRemaining = 15
     this.questionIndex = 0
     this.questionBank = this.createQuestionBank()
@@ -58,7 +63,6 @@ export class GameScene extends Phaser.Scene {
         color: '#ff3355',
         fontFamily: 'Arial, sans-serif',
         fontSize: '32px',
-        letterSpacing: 2,
         align: 'center',
         rtl: true,
       })
@@ -80,6 +84,36 @@ export class GameScene extends Phaser.Scene {
         color: '#ffffff',
         fontFamily: 'Arial, sans-serif',
         fontSize: '18px',
+        align: 'center',
+        rtl: true,
+      })
+      .setOrigin(0.5)
+
+    this.teamXScoreLabel = this.add
+      .text(0, 0, '', {
+        color: '#ff3355',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '18px',
+        align: 'left',
+        rtl: true,
+      })
+      .setOrigin(0, 0.5)
+
+    this.teamOScoreLabel = this.add
+      .text(0, 0, '', {
+        color: '#ffffff',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '18px',
+        align: 'right',
+        rtl: true,
+      })
+      .setOrigin(1, 0.5)
+
+    this.powerCountsLabel = this.add
+      .text(0, 0, '', {
+        color: '#f9d65c',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '16px',
         align: 'center',
         rtl: true,
       })
@@ -111,6 +145,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: 'Arial, sans-serif',
         fontSize: '16px',
         align: 'center',
+        rtl: true,
       })
       .setOrigin(0.5)
 
@@ -144,6 +179,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: 'Arial, sans-serif',
         fontSize: '16px',
         align: 'center',
+        rtl: true,
       })
       .setOrigin(0.5)
 
@@ -155,11 +191,13 @@ export class GameScene extends Phaser.Scene {
         fontFamily: 'Arial, sans-serif',
         fontSize: '16px',
         align: 'center',
+        rtl: true,
       })
       .setOrigin(0.5)
 
     this.trapButton = this.createTrapButton()
 
+    this.createLayoutContainers()
     this.createCells()
     this.updateTurnLabel()
     this.updateStageLabel()
@@ -360,12 +398,139 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  createLayoutContainers() {
+    this.centerPanel = this.createPanelContainer(1)
+    this.topBarPanel = this.createPanelContainer(5)
+    this.leftPanel = this.createPanelContainer(5)
+    this.rightPanel = this.createPanelContainer(5)
+    this.bottomPanel = this.createPanelContainer(5)
+
+    this.currentTeamHeading = this.createPanelHeading('الفريق الحالي')
+    this.resourcesHeading = this.createPanelHeading('الموارد')
+    this.abilityStatusHeading = this.createPanelHeading('حالة القدرات')
+    this.questionAreaHeading = this.createPanelHeading('منطقة السؤال')
+    this.questionIdleText = this.createPanelText('بانتظار اختيار خانة من اللوحة', 15, '#cbd5e1')
+    this.questionTimerIdleText = this.createPanelText('المؤقت: --', 15, '#f9d65c')
+    this.questionResultHeading = this.createPanelHeading('النتيجة')
+    this.questionResultLabel = this.createPanelText('النتيجة: بانتظار السؤال', 15, '#ffffff')
+
+    this.topBarPanel.container.add([this.title, this.stageLabel, this.teamXScoreLabel, this.teamOScoreLabel])
+    this.leftPanel.container.add([
+      this.currentTeamHeading,
+      this.turnLabel,
+      this.resourcesHeading,
+      this.powerCountsLabel,
+      this.shieldCountsLabel,
+      this.stealCountsLabel,
+      this.trapCountsLabel,
+      this.abilityStatusHeading,
+      this.powerStatusLabel,
+      this.shieldStatusLabel,
+      this.stealStatusLabel,
+      this.trapStatusLabel,
+    ])
+    this.rightPanel.container.add([
+      this.questionAreaHeading,
+      this.questionIdleText,
+      this.questionTimerIdleText,
+      this.questionResultHeading,
+      this.questionResultLabel,
+    ])
+    this.bottomPanel.container.add([this.powerButton, this.shieldButton, this.stealButton, this.trapButton])
+  }
+
+  createPanelContainer(depth) {
+    const container = this.add.container(0, 0).setDepth(depth)
+    const graphics = this.add.graphics()
+
+    container.add(graphics)
+
+    return {
+      container,
+      graphics,
+      width: 0,
+      height: 0,
+    }
+  }
+
+  createPanelHeading(text) {
+    return this.add
+      .text(0, 0, text, {
+        color: '#ff3355',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '16px',
+        fontStyle: 'bold',
+        align: 'center',
+        rtl: true,
+      })
+      .setOrigin(0.5)
+  }
+
+  createPanelText(text, fontSize = 15, color = '#ffffff') {
+    return this.add
+      .text(0, 0, text, {
+        color,
+        fontFamily: 'Arial, sans-serif',
+        fontSize: `${fontSize}px`,
+        align: 'center',
+        rtl: true,
+        wordWrap: { width: 260 },
+      })
+      .setOrigin(0.5)
+  }
+
+  drawPanel(panel, x, y, width, height, accent = 'top') {
+    const graphics = panel.graphics
+
+    panel.container.setPosition(x, y)
+    panel.width = width
+    panel.height = height
+    graphics.clear()
+    graphics.fillStyle(0x070b14, 0.92)
+    graphics.fillRoundedRect(0, 0, width, height, 8)
+    graphics.lineStyle(1, 0xff3355, 0.55)
+    graphics.strokeRoundedRect(0.5, 0.5, width - 1, height - 1, 8)
+    graphics.lineStyle(1, 0xffffff, 0.08)
+    graphics.strokeRoundedRect(5.5, 5.5, width - 11, height - 11, 6)
+    graphics.fillStyle(0xff3355, 0.95)
+
+    if (accent === 'left') {
+      graphics.fillRect(0, 18, 3, Math.max(0, height - 36))
+      return
+    }
+
+    graphics.fillRect(18, 0, Math.max(0, width - 36), 3)
+  }
+
+  setTextWrap(textObject, width) {
+    if (textObject && textObject.setWordWrapWidth) {
+      textObject.setWordWrapWidth(Math.max(120, width))
+    }
+  }
+
+  setQuestionIdleVisible(isVisible) {
+    if (this.questionIdleText) {
+      this.questionIdleText.setVisible(isVisible)
+    }
+
+    if (this.questionTimerIdleText) {
+      this.questionTimerIdleText.setVisible(isVisible)
+    }
+  }
+
+  updateQuestionResult(message) {
+    if (this.questionResultLabel) {
+      this.questionResultLabel.setText(message)
+    }
+  }
+
   createCells() {
     // Each transparent rectangle is an input target for one board cell.
     for (let index = 0; index < 9; index += 1) {
       const cell = this.add
         .rectangle(0, 0, 1, 1, 0x000000, 0)
         .setOrigin(0)
+        .setDepth(4)
         .setInteractive({ useHandCursor: true })
 
       cell.on('pointerdown', () => {
@@ -425,6 +590,7 @@ export class GameScene extends Phaser.Scene {
         fontStyle: 'bold',
       })
       .setOrigin(0.5)
+      .setDepth(4)
 
     this.marks[index] = mark
   }
@@ -443,28 +609,41 @@ export class GameScene extends Phaser.Scene {
     this.teamAnswers = this.createTeamAnswerState()
     this.answerStatusLabels = {}
     this.questionTimeRemaining = 15
+    this.setQuestionIdleVisible(false)
+    this.updateQuestionResult('النتيجة: بانتظار الإجابات')
 
-    const { width, height } = this.scale
-    const panelWidth = Math.min(width * 0.9, 620)
-    const panelHeight = Math.min(height * 0.82, 520)
+    this.renderQuestionPanel(question)
+    this.startQuestionTimer()
+  }
 
-    this.questionModal = this.add.container(width / 2, height / 2)
-    this.questionModal.setDepth(10)
+  renderQuestionPanel(question) {
+    if (!this.rightPanel) {
+      return
+    }
 
-    const backdrop = this.add.rectangle(0, 0, width, height, 0x000000, 0.55)
-    const panel = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x111827, 1)
+    if (this.questionModal) {
+      this.questionModal.destroy()
+    }
+
+    this.answerStatusLabels = {}
+
+    const { panelWidth, panelHeight, x, y } = this.getQuestionPanelMetrics()
+
+    this.questionModal = this.add.container(x, y)
+
+    const panel = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x0b1220, 0.96).setStrokeStyle(1, 0xff3355, 0.35)
     const questionText = this.add
-      .text(0, -panelHeight / 2 + 48, question.question, {
+      .text(0, -panelHeight / 2 + 42, question.question, {
         color: '#ffffff',
         fontFamily: 'Arial, sans-serif',
-        fontSize: '19px',
+        fontSize: '17px',
         align: 'right',
         rtl: true,
-        wordWrap: { width: panelWidth - 48 },
+        wordWrap: { width: panelWidth - 34 },
       })
       .setOrigin(0.5)
     this.questionTimerText = this.add
-      .text(0, -panelHeight / 2 + 80, 'الوقت: 15', {
+      .text(0, -panelHeight / 2 + 82, `الوقت: ${this.questionTimeRemaining}`, {
         color: '#f9d65c',
         fontFamily: 'Arial, sans-serif',
         fontSize: '16px',
@@ -473,11 +652,36 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
 
-    this.questionModal.add([backdrop, panel, questionText, this.questionTimerText])
-    this.createAnswerSection('captain', 'إجابة الكابتن', -panelWidth * 0.24, -panelHeight / 2 + 116, panelWidth * 0.42, question)
-    this.createAnswerSection('partner', 'إجابة الشريك', panelWidth * 0.24, -panelHeight / 2 + 116, panelWidth * 0.42, question)
+    const sectionWidth = panelWidth - 34
+    const firstSectionY = -panelHeight / 2 + 124
+    const secondSectionY = firstSectionY + Math.min(210, Math.max(184, panelHeight * 0.33))
+
+    this.questionModal.add([panel, questionText, this.questionTimerText])
+    this.createAnswerSection('captain', 'إجابة الكابتن', 0, firstSectionY, sectionWidth, question)
+    this.createAnswerSection('partner', 'إجابة الشريك', 0, secondSectionY, sectionWidth, question)
     this.questionModal.add(this.createSubmitButton(panelHeight))
-    this.startQuestionTimer()
+    this.rightPanel.container.add(this.questionModal)
+    this.refreshSelectedAnswerLabels()
+  }
+
+  getQuestionPanelMetrics() {
+    const panelWidth = Math.max(280, this.rightPanel.width - 34)
+    const panelHeight = Math.max(500, this.rightPanel.height - 190)
+
+    return {
+      panelWidth,
+      panelHeight,
+      x: this.rightPanel.width / 2,
+      y: 74 + panelHeight / 2,
+    }
+  }
+
+  refreshSelectedAnswerLabels() {
+    Object.keys(this.answerStatusLabels).forEach((role) => {
+      if (this.teamAnswers[role] !== null) {
+        this.updateSelectedAnswerLabel(role)
+      }
+    })
   }
 
   createAnswerSection(role, title, x, y, sectionWidth, question) {
@@ -504,7 +708,7 @@ export class GameScene extends Phaser.Scene {
     this.questionModal.add([heading, selectedText])
 
     question.options.forEach((option, answerIndex) => {
-      const button = this.createAnswerButton(role, option, answerIndex, x, y + 66 + answerIndex * 46, sectionWidth)
+      const button = this.createAnswerButton(role, option, answerIndex, x, y + 56 + answerIndex * 38, sectionWidth)
 
       this.questionModal.add(button)
     })
@@ -513,14 +717,14 @@ export class GameScene extends Phaser.Scene {
   createAnswerButton(role, choice, answerIndex, x, y, buttonWidth) {
     const button = this.add.container(x, y)
     const background = this.add
-      .rectangle(0, 0, buttonWidth, 36, 0x1f2937, 1)
-      .setStrokeStyle(1, 0xffffff, 0.35)
+      .rectangle(0, 0, buttonWidth, 34, 0x1f2937, 1)
+      .setStrokeStyle(1, 0xff3355, 0.35)
       .setInteractive({ useHandCursor: true })
     const label = this.add
       .text(0, 0, choice, {
         color: '#ffffff',
         fontFamily: 'Arial, sans-serif',
-        fontSize: '15px',
+        fontSize: '14px',
         align: 'right',
         rtl: true,
         wordWrap: { width: buttonWidth - 16 },
@@ -585,6 +789,7 @@ export class GameScene extends Phaser.Scene {
     this.stopQuestionTimer()
     const isCorrect = this.areTeamAnswersCorrect()
 
+    this.updateQuestionResult(isCorrect ? 'النتيجة: إجابة صحيحة' : 'النتيجة: إجابة غير صحيحة')
     this.closeQuestionModal()
 
     if (isCorrect) {
@@ -621,6 +826,7 @@ export class GameScene extends Phaser.Scene {
     this.activeQuestion = null
     this.teamAnswers = this.createTeamAnswerState()
     this.answerStatusLabels = {}
+    this.setQuestionIdleVisible(true)
   }
 
   startQuestionTimer() {
@@ -662,6 +868,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.pendingCellIndex = null
+    this.updateQuestionResult('النتيجة: انتهى الوقت')
     this.closeQuestionModal()
     this.switchTurn()
   }
@@ -725,15 +932,172 @@ export class GameScene extends Phaser.Scene {
     this.matchComplete = true
     this.stageLocked = true
     this.updateAbilityUI()
+    const winner = this.getMatchWinner()
 
-    if (this.stageScores.X === this.stageScores.O) {
+    if (!winner) {
       this.turnLabel.setText('تعادل')
+      this.showMatchEndScreen(winner)
       return
     }
 
-    const winner = this.stageScores.X > this.stageScores.O ? 'X' : 'O'
-
     this.turnLabel.setText(`فاز الفريق ${winner} بالمباراة`)
+    this.showMatchEndScreen(winner)
+  }
+
+  getMatchWinner() {
+    if (this.stageScores.X === this.stageScores.O) {
+      return null
+    }
+
+    return this.stageScores.X > this.stageScores.O ? 'X' : 'O'
+  }
+
+  showMatchEndScreen(winner) {
+    this.hideMatchEndScreen()
+
+    const overlay = this.add.container(0, 0).setDepth(100)
+    const dim = this.add.rectangle(0, 0, 1, 1, 0x000000, 0.72).setOrigin(0).setInteractive()
+    const panel = this.add.graphics()
+    const title = this.add
+      .text(0, 0, 'انتهت المباراة', {
+        color: '#ff3355',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '34px',
+        fontStyle: 'bold',
+        align: 'center',
+        rtl: true,
+      })
+      .setOrigin(0.5)
+    const winnerLabel = this.add
+      .text(0, 0, winner ? `الفائز: الفريق ${winner}` : 'الفائز: تعادل', {
+        color: '#ffffff',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '24px',
+        align: 'center',
+        rtl: true,
+      })
+      .setOrigin(0.5)
+    const scoreLabel = this.add
+      .text(0, 0, `النتيجة النهائية: X ${this.stageScores.X} - ${this.stageScores.O} O`, {
+        color: '#ffffff',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '20px',
+        align: 'center',
+        rtl: true,
+      })
+      .setOrigin(0.5)
+    const playAgainButton = this.createMatchEndButton('Play Again', () => {
+      this.resetMatch()
+    })
+    const menuButton = this.createMatchEndButton('Return to Main Menu', () => {
+      this.returnToMainMenu()
+    })
+
+    overlay.add([dim, panel, title, winnerLabel, scoreLabel, playAgainButton, menuButton])
+    overlay.dim = dim
+    overlay.panel = panel
+    overlay.title = title
+    overlay.winnerLabel = winnerLabel
+    overlay.scoreLabel = scoreLabel
+    overlay.playAgainButton = playAgainButton
+    overlay.menuButton = menuButton
+    this.matchEndOverlay = overlay
+    this.layoutMatchEndOverlay(this.scale.width, this.scale.height)
+  }
+
+  createMatchEndButton(labelText, onClick) {
+    const button = this.add.container(0, 0)
+    const background = this.add
+      .rectangle(0, 0, 260, 44, 0x111827, 1)
+      .setStrokeStyle(1, 0xff3355, 0.9)
+      .setInteractive({ useHandCursor: true })
+    const label = this.add
+      .text(0, 0, labelText, {
+        color: '#ffffff',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '16px',
+        align: 'center',
+      })
+      .setOrigin(0.5)
+
+    background.on('pointerdown', onClick)
+    button.add([background, label])
+
+    return button
+  }
+
+  layoutMatchEndOverlay(width, height) {
+    if (!this.matchEndOverlay) {
+      return
+    }
+
+    const panelWidth = Math.min(560, width * 0.86)
+    const panelHeight = 350
+    const panelX = width / 2
+    const panelY = height / 2
+    const overlay = this.matchEndOverlay
+
+    overlay.dim.setSize(width, height)
+    overlay.panel.clear()
+    overlay.panel.fillStyle(0x070b14, 0.97)
+    overlay.panel.fillRoundedRect(panelX - panelWidth / 2, panelY - panelHeight / 2, panelWidth, panelHeight, 12)
+    overlay.panel.lineStyle(2, 0xff3355, 0.9)
+    overlay.panel.strokeRoundedRect(panelX - panelWidth / 2 + 1, panelY - panelHeight / 2 + 1, panelWidth - 2, panelHeight - 2, 12)
+    overlay.panel.lineStyle(1, 0xffffff, 0.12)
+    overlay.panel.strokeRoundedRect(panelX - panelWidth / 2 + 10, panelY - panelHeight / 2 + 10, panelWidth - 20, panelHeight - 20, 8)
+    overlay.title.setPosition(panelX, panelY - 112)
+    overlay.winnerLabel.setPosition(panelX, panelY - 54)
+    overlay.scoreLabel.setPosition(panelX, panelY - 14)
+    overlay.playAgainButton.setPosition(panelX, panelY + 68)
+    overlay.menuButton.setPosition(panelX, panelY + 126)
+  }
+
+  hideMatchEndScreen() {
+    if (!this.matchEndOverlay) {
+      return
+    }
+
+    this.matchEndOverlay.destroy()
+    this.matchEndOverlay = null
+  }
+
+  resetMatch() {
+    this.hideMatchEndScreen()
+    this.closeQuestionModal()
+    this.currentStage = 1
+    this.stageScores = {
+      X: 0,
+      O: 0,
+    }
+    this.powerRemaining = {
+      X: 1,
+      O: 1,
+    }
+    this.shieldRemaining = {
+      X: 1,
+      O: 1,
+    }
+    this.stealRemaining = {
+      X: 1,
+      O: 1,
+    }
+    this.trapRemaining = {
+      X: 1,
+      O: 1,
+    }
+    this.questionIndex = 0
+    this.matchComplete = false
+    this.updateQuestionResult('النتيجة: بانتظار السؤال')
+    this.resetStage()
+  }
+
+  returnToMainMenu() {
+    if (this.scene.manager.keys.MainMenu) {
+      this.scene.start('MainMenu')
+      return
+    }
+
+    this.scene.restart()
   }
 
   drawBackground(width, height) {
@@ -855,11 +1219,12 @@ export class GameScene extends Phaser.Scene {
       .setStrokeStyle(1, 0x34d399, 0.7)
       .setInteractive({ useHandCursor: true })
     const label = this.add
-      .text(0, 0, 'Activate Steal', {
+      .text(0, 0, 'تفعيل السرقة', {
         color: '#ffffff',
         fontFamily: 'Arial, sans-serif',
         fontSize: '15px',
         align: 'center',
+        rtl: true,
       })
       .setOrigin(0.5)
 
@@ -881,11 +1246,12 @@ export class GameScene extends Phaser.Scene {
       .setStrokeStyle(1, 0xfb923c, 0.7)
       .setInteractive({ useHandCursor: true })
     const label = this.add
-      .text(0, 0, 'Activate Trap', {
+      .text(0, 0, 'تفعيل الفخ', {
         color: '#ffffff',
         fontFamily: 'Arial, sans-serif',
         fontSize: '15px',
         align: 'center',
+        rtl: true,
       })
       .setOrigin(0.5)
 
@@ -905,7 +1271,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   updateStageLabel() {
-    this.stageLabel.setText(`الجولة ${this.currentStage}/${this.maxStages}   الفريق X: ${this.stageScores.X}   الفريق O: ${this.stageScores.O}   القوة X: ${this.powerRemaining.X}   القوة O: ${this.powerRemaining.O}`)
+    this.stageLabel.setText(`الجولة ${this.currentStage}/${this.maxStages}`)
+    this.teamXScoreLabel.setText(`الفريق X: ${this.stageScores.X}`)
+    this.teamOScoreLabel.setText(`الفريق O: ${this.stageScores.O}`)
+    this.powerCountsLabel.setText(`القوة X: ${this.powerRemaining.X}   القوة O: ${this.powerRemaining.O}`)
   }
 
   updateAbilityUI() {
@@ -960,7 +1329,7 @@ export class GameScene extends Phaser.Scene {
     if (isArmed) {
       this.shieldStatusLabel.setText(`الدرع: مفعّل للفريق ${this.currentPlayer}`)
     } else if (hasShield && !hasTarget) {
-      this.shieldStatusLabel.setText('Shield: No unprotected owned square')
+      this.shieldStatusLabel.setText('الدرع: لا توجد خانة مملوكة غير محمية')
     } else if (hasShield) {
       this.shieldStatusLabel.setText(`الدرع: متاح للفريق ${this.currentPlayer}`)
     } else {
@@ -981,7 +1350,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   updateStealCountsLabel() {
-    this.stealCountsLabel.setText(`Steal X: ${this.stealRemaining.X}   Steal O: ${this.stealRemaining.O}`)
+    this.stealCountsLabel.setText(`السرقة X: ${this.stealRemaining.X}   السرقة O: ${this.stealRemaining.O}`)
   }
 
   updateStealUI() {
@@ -994,16 +1363,16 @@ export class GameScene extends Phaser.Scene {
     const canActivate = !this.matchComplete && !this.stageLocked && !this.questionOpen && hasSteal && hasTarget && !isArmed && !powerArmed && !shieldArmed && !trapArmed
 
     if (isArmed) {
-      this.stealStatusLabel.setText('Steal: Armed')
+      this.stealStatusLabel.setText(`السرقة: مفعّلة للفريق ${this.currentPlayer}`)
     } else if (hasSteal && !hasTarget) {
-      this.stealStatusLabel.setText('Steal: No unprotected opponent square')
+      this.stealStatusLabel.setText('السرقة: لا توجد خانة خصم غير محمية')
     } else if (hasSteal) {
-      this.stealStatusLabel.setText('Steal: Available')
+      this.stealStatusLabel.setText(`السرقة: متاحة للفريق ${this.currentPlayer}`)
     } else {
-      this.stealStatusLabel.setText('Steal: Used')
+      this.stealStatusLabel.setText(`السرقة: مستخدمة للفريق ${this.currentPlayer}`)
     }
 
-    this.stealButton.label.setText(canActivate ? 'Activate Steal' : 'Steal Unavailable')
+    this.stealButton.label.setText(canActivate ? 'تفعيل السرقة' : 'السرقة غير متاحة')
 
     if (canActivate) {
       this.stealButton.background.setInteractive({ useHandCursor: true })
@@ -1017,7 +1386,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   updateTrapCountsLabel() {
-    this.trapCountsLabel.setText(`Trap X: ${this.trapRemaining.X}   Trap O: ${this.trapRemaining.O}`)
+    this.trapCountsLabel.setText(`الفخ X: ${this.trapRemaining.X}   الفخ O: ${this.trapRemaining.O}`)
   }
 
   updateTrapUI() {
@@ -1030,16 +1399,16 @@ export class GameScene extends Phaser.Scene {
     const canActivate = !this.matchComplete && !this.stageLocked && !this.questionOpen && hasTrap && hasTarget && !isArmed && !powerArmed && !shieldArmed && !stealArmed
 
     if (isArmed) {
-      this.trapStatusLabel.setText('Trap: Armed')
+      this.trapStatusLabel.setText(`الفخ: مفعّل للفريق ${this.currentPlayer}`)
     } else if (hasTrap && !hasTarget) {
-      this.trapStatusLabel.setText('Trap: No empty untrapped square')
+      this.trapStatusLabel.setText('الفخ: لا توجد خانة فارغة بلا فخ')
     } else if (hasTrap) {
-      this.trapStatusLabel.setText('Trap: Available')
+      this.trapStatusLabel.setText(`الفخ: متاح للفريق ${this.currentPlayer}`)
     } else {
-      this.trapStatusLabel.setText('Trap: Used')
+      this.trapStatusLabel.setText(`الفخ: مستخدم للفريق ${this.currentPlayer}`)
     }
 
-    this.trapButton.label.setText(canActivate ? 'Activate Trap' : 'Trap Unavailable')
+    this.trapButton.label.setText(canActivate ? 'تفعيل الفخ' : 'الفخ غير متاح')
 
     if (canActivate) {
       this.trapButton.background.setInteractive({ useHandCursor: true })
@@ -1072,7 +1441,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (!this.hasValidShieldTarget()) {
-      this.shieldStatusLabel.setText('Shield: No unprotected owned square')
+      this.shieldStatusLabel.setText('الدرع: لا توجد خانة مملوكة غير محمية')
       this.updateShieldUI()
       return
     }
@@ -1090,7 +1459,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (!this.hasValidStealTarget()) {
-      this.stealStatusLabel.setText('Steal: No unprotected opponent square')
+      this.stealStatusLabel.setText('السرقة: لا توجد خانة خصم غير محمية')
       this.updateStealUI()
       return
     }
@@ -1108,7 +1477,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (!this.hasValidTrapTarget()) {
-      this.trapStatusLabel.setText('Trap: No empty untrapped square')
+      this.trapStatusLabel.setText('الفخ: لا توجد خانة فارغة بلا فخ')
       this.updateTrapUI()
       return
     }
@@ -1357,7 +1726,7 @@ export class GameScene extends Phaser.Scene {
       this.protectedMarkers[index].destroy()
     }
 
-    const marker = this.add.circle(0, 0, 10, 0x7dd3fc, 0.3).setStrokeStyle(2, 0x7dd3fc, 1)
+    const marker = this.add.circle(0, 0, 10, 0x7dd3fc, 0.3).setStrokeStyle(2, 0x7dd3fc, 1).setDepth(4)
     marker.index = index
     this.protectedMarkers[index] = marker
   }
@@ -1410,31 +1779,91 @@ export class GameScene extends Phaser.Scene {
 
   layoutBoard() {
     const { width, height } = this.scale
-    const boardSize = Math.min(width * 0.78, height * 0.58, 460)
+    const margin = Math.max(20, Math.min(28, width * 0.015))
+    const gap = Math.max(18, Math.min(28, width * 0.014))
+    const topBarHeight = 74
+    const bottomBarHeight = 96
+    const topBarX = margin
+    const topBarY = 18
+    const topBarWidth = width - margin * 2
+    const panelTop = topBarY + topBarHeight + 18
+    const bottomPanelY = height - bottomBarHeight - margin
+    const sidePanelHeight = bottomPanelY - panelTop - gap
+    const leftPanelWidth = Math.min(330, Math.max(290, width * 0.18))
+    const rightPanelWidth = Math.min(410, Math.max(350, width * 0.21))
+    const leftPanelX = margin
+    const rightPanelX = width - margin - rightPanelWidth
+    const centerPanelX = leftPanelX + leftPanelWidth + gap
+    const centerPanelWidth = rightPanelX - gap - centerPanelX
+    const centerPanelHeight = sidePanelHeight
+    const boardSize = Math.min(centerPanelWidth * 0.72, centerPanelHeight * 0.76, 560)
     const cellSize = boardSize / 3
-    const boardX = (width - boardSize) / 2
-    const boardY = (height - boardSize) / 2 + Math.min(height * 0.04, 28)
-    const titleGap = Math.max(30, Math.min(52, boardSize * 0.12))
+    const boardX = centerPanelX + (centerPanelWidth - boardSize) / 2
+    const boardY = panelTop + (centerPanelHeight - boardSize) / 2
+    const bottomPanelWidth = width - margin * 2
+    const bottomButtonGap = Math.min(240, Math.max(204, (bottomPanelWidth - 120) / 4))
+    const bottomButtonStartX = bottomPanelWidth / 2 - bottomButtonGap * 1.5
 
     this.drawBackground(width, height)
-    this.title.setPosition(width / 2, boardY - titleGap)
-    this.stageLabel.setPosition(width / 2, boardY - Math.max(16, titleGap * 0.38))
-    this.shieldCountsLabel.setPosition(width / 2, this.stageLabel.y + 20)
-    this.stealCountsLabel.setPosition(width / 2, this.shieldCountsLabel.y + 20)
-    this.trapCountsLabel.setPosition(width / 2, this.stealCountsLabel.y + 20)
-    this.turnLabel.setPosition(width / 2, boardY + boardSize + Math.max(32, boardSize * 0.1))
-    this.powerStatusLabel.setPosition(width / 2, this.turnLabel.y + 28)
-    this.powerButton.setPosition(width / 2, this.powerStatusLabel.y + 28)
-    this.shieldStatusLabel.setPosition(width / 2, this.powerButton.y + 28)
-    this.shieldButton.setPosition(width / 2, this.shieldStatusLabel.y + 28)
-    this.stealStatusLabel.setPosition(width / 2, this.shieldButton.y + 28)
-    this.stealButton.setPosition(width / 2, this.stealStatusLabel.y + 28)
-    this.trapStatusLabel.setPosition(width / 2, this.stealButton.y + 28)
-    this.trapButton.setPosition(width / 2, this.trapStatusLabel.y + 28)
+    this.drawPanel(this.topBarPanel, topBarX, topBarY, topBarWidth, topBarHeight)
+    this.drawPanel(this.leftPanel, leftPanelX, panelTop, leftPanelWidth, sidePanelHeight, 'left')
+    this.drawPanel(this.centerPanel, centerPanelX, panelTop, centerPanelWidth, centerPanelHeight)
+    this.drawPanel(this.rightPanel, rightPanelX, panelTop, rightPanelWidth, sidePanelHeight, 'left')
+    this.drawPanel(this.bottomPanel, margin, bottomPanelY, bottomPanelWidth, bottomBarHeight)
+
+    this.title.setFontSize(24)
+    this.title.setPosition(topBarWidth / 2, 23)
+    this.stageLabel.setPosition(topBarWidth / 2, 53)
+    this.teamXScoreLabel.setPosition(24, 42)
+    this.teamOScoreLabel.setPosition(topBarWidth - 24, 42)
+
+    this.currentTeamHeading.setPosition(leftPanelWidth / 2, 34)
+    this.turnLabel.setFontSize(22)
+    this.turnLabel.setPosition(leftPanelWidth / 2, 72)
+    this.resourcesHeading.setPosition(leftPanelWidth / 2, 126)
+    this.powerCountsLabel.setPosition(leftPanelWidth / 2, 164)
+    this.shieldCountsLabel.setPosition(leftPanelWidth / 2, 194)
+    this.stealCountsLabel.setPosition(leftPanelWidth / 2, 224)
+    this.trapCountsLabel.setPosition(leftPanelWidth / 2, 254)
+    this.abilityStatusHeading.setPosition(leftPanelWidth / 2, 318)
+    this.powerStatusLabel.setPosition(leftPanelWidth / 2, 356)
+    this.shieldStatusLabel.setPosition(leftPanelWidth / 2, 388)
+    this.stealStatusLabel.setPosition(leftPanelWidth / 2, 420)
+    this.trapStatusLabel.setPosition(leftPanelWidth / 2, 452)
+
+    const leftTextWidth = leftPanelWidth - 36
+    this.setTextWrap(this.turnLabel, leftTextWidth)
+    this.setTextWrap(this.powerCountsLabel, leftTextWidth)
+    this.setTextWrap(this.shieldCountsLabel, leftTextWidth)
+    this.setTextWrap(this.stealCountsLabel, leftTextWidth)
+    this.setTextWrap(this.trapCountsLabel, leftTextWidth)
+    this.setTextWrap(this.powerStatusLabel, leftTextWidth)
+    this.setTextWrap(this.shieldStatusLabel, leftTextWidth)
+    this.setTextWrap(this.stealStatusLabel, leftTextWidth)
+    this.setTextWrap(this.trapStatusLabel, leftTextWidth)
+
+    this.questionAreaHeading.setPosition(rightPanelWidth / 2, 34)
+    this.questionTimerIdleText.setPosition(rightPanelWidth / 2, 82)
+    this.questionIdleText.setPosition(rightPanelWidth / 2, 150)
+    this.questionResultHeading.setPosition(rightPanelWidth / 2, sidePanelHeight - 74)
+    this.questionResultLabel.setPosition(rightPanelWidth / 2, sidePanelHeight - 42)
+    this.setTextWrap(this.questionIdleText, rightPanelWidth - 44)
+    this.setTextWrap(this.questionResultLabel, rightPanelWidth - 44)
+
+    this.powerButton.setPosition(bottomButtonStartX, bottomBarHeight / 2)
+    this.shieldButton.setPosition(bottomButtonStartX + bottomButtonGap, bottomBarHeight / 2)
+    this.stealButton.setPosition(bottomButtonStartX + bottomButtonGap * 2, bottomBarHeight / 2)
+    this.trapButton.setPosition(bottomButtonStartX + bottomButtonGap * 3, bottomBarHeight / 2)
+
+    if (this.questionOpen && this.activeQuestion) {
+      this.setQuestionIdleVisible(false)
+      this.renderQuestionPanel(this.activeQuestion)
+    }
 
     this.drawGrid(boardX, boardY, boardSize, cellSize)
     this.positionCells(boardX, boardY, cellSize)
     this.positionMarks(boardX, boardY, cellSize)
     this.positionProtectedMarkers(boardX, boardY, cellSize)
+    this.layoutMatchEndOverlay(width, height)
   }
 }
