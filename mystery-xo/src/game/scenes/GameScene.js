@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { socketService } from '../../network/socketService.js'
 import { QUESTION_BANK } from '../data/questions.js'
 import { ABILITY_NAMES } from '../constants/abilityNames.js'
 import { MAX_STAGES, QUESTION_TIME_LIMIT } from '../constants/gameConstants.js'
@@ -108,10 +109,10 @@ export class GameScene extends Phaser.Scene {
     this.layoutBoard()
 
     this.scale.on('resize', this.layoutBoard, this)
+    this.setupMultiplayerSync()
   }
 
   createEmptyBoard() {
-    // Board state mirrors the 3x3 grid: null means empty, X/O means occupied.
     return [
       [null, null, null],
       [null, null, null],
@@ -120,7 +121,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   createWinningLines() {
-    // Lines use flat cell indexes so future stages can reuse the same checker.
     return [
       [0, 1, 2],
       [3, 4, 5],
@@ -495,6 +495,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   handleCellClick(index) {
+    if (this.isMultiplayerMode) {
+      try {
+        socketService.selectCell(index)
+      } catch (error) {
+        console.error(error)
+      }
+      return
+    }
+
     this.applyTurnResult(
       this.turnResolver.handleCellClick({
         index,
@@ -640,7 +649,7 @@ export class GameScene extends Phaser.Scene {
 
   declareStageDraw() {
     this.matchSystem.lockStage()
-    this.turnLabel.setText('\u062A\u0639\u0627\u062F\u0644 \u0627\u0644\u062C\u0648\u0644\u0629')
+    this.turnLabel.setText('تعادل الجولة')
     this.updateAbilityUI()
 
     this.time.delayedCall(2000, () => {
@@ -716,7 +725,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawBackground(width, height) {
-    // Horizontal bands create a subtle dark gradient without extra assets.
     this.backgroundGraphics.clear()
 
     const bands = 24
@@ -1124,6 +1132,106 @@ export class GameScene extends Phaser.Scene {
     const marker = this.add.circle(0, 0, 10, 0x7dd3fc, 0.3).setStrokeStyle(2, 0x7dd3fc, 1).setDepth(4)
     marker.index = index
     this.protectedMarkers[index] = marker
+  }
+
+  setupMultiplayerSync() {
+    this.isMultiplayerMode = socketService.isMultiplayerActive?.() ?? false
+    this.multiplayerUnsubscribers = []
+
+    if (!this.isMultiplayerMode) {
+      return
+    }
+
+    this.disableLocalMultiplayerUnsupportedUI()
+    this.applyServerGameSnapshot(socketService.getGameSnapshot())
+
+    const listen = (event, handler) => {
+      const unsubscribe = socketService.on(event, handler)
+      this.multiplayerUnsubscribers.push(unsubscribe)
+    }
+
+    listen('game:snapshot', (payload) => {
+      this.applyServerGameSnapshot(payload?.game ?? payload?.room?.game)
+    })
+
+    listen('board:update', (payload) => {
+      this.applyServerGameSnapshot(payload?.game ?? payload?.room?.game)
+    })
+
+    listen('turn:started', (payload) => {
+      this.applyServerGameSnapshot(payload?.game ?? payload?.room?.game)
+    })
+
+    listen('stage:end', (payload) => {
+      const game = payload?.game ?? payload?.room?.game
+      this.applyServerGameSnapshot(game)
+      this.turnLabel.setText(payload?.winner ? `فاز الفريق ${payload.winner} بالجولة` : 'تعادل الجولة')
+    })
+
+    listen('match:end', (payload) => {
+      const game = payload?.game ?? payload?.room?.game
+      this.applyServerGameSnapshot(game)
+      this.showMatchEndScreen(payload?.winner ?? null)
+    })
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.multiplayerUnsubscribers?.forEach((unsubscribe) => unsubscribe())
+      this.multiplayerUnsubscribers = []
+    })
+  }
+
+  disableLocalMultiplayerUnsupportedUI() {
+    const unsupportedButtons = [
+      this.powerButton,
+      this.shieldButton,
+      this.stealButton,
+      this.trapButton,
+    ]
+
+    unsupportedButtons.forEach((button) => {
+      if (button?.disableInteractive) {
+        button.disableInteractive()
+        if (button.setAlpha) {
+          button.setAlpha(0.35)
+        }
+      }
+    })
+
+    this.updateQuestionResult('Multiplayer board sync mode')
+  }
+
+  applyServerGameSnapshot(game) {
+    if (!game) {
+      return
+    }
+
+    this.currentPlayer = game.currentTurnTeam ?? 'X'
+    this.currentStage = game.currentStage ?? 1
+    this.maxStages = game.maxStages ?? this.maxStages
+    this.stageScores = game.stageScores ?? { X: 0, O: 0 }
+
+    this.board = this.flatBoardToMatrix(game.board ?? Array(9).fill(null))
+
+    this.marks.forEach((mark) => mark.destroy())
+    this.marks = []
+
+    ;(game.board ?? []).forEach((value, index) => {
+      if (value) {
+        this.createMark(index, value)
+      }
+    })
+
+    this.updateTurnLabel()
+    this.updateStageLabel()
+    this.layoutBoard()
+  }
+
+  flatBoardToMatrix(flatBoard) {
+    return [
+      [flatBoard[0] ?? null, flatBoard[1] ?? null, flatBoard[2] ?? null],
+      [flatBoard[3] ?? null, flatBoard[4] ?? null, flatBoard[5] ?? null],
+      [flatBoard[6] ?? null, flatBoard[7] ?? null, flatBoard[8] ?? null],
+    ]
   }
 
   resetStage() {

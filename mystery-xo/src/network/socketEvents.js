@@ -1,0 +1,15 @@
+export const SOCKET_EVENTS = {
+  ROOM_CREATED: 'room:created',
+  ROOM_JOINED: 'room:joined',
+  ROOM_UPDATE: 'room:update',
+  ROOM_ERROR: 'room:error',
+  HOST_CHANGED: 'host:changed',
+  MATCH_STARTING: 'match:starting',
+  ROOM_CREATE: 'room:create',
+  ROOM_JOIN: 'room:join',
+  ROOM_UPDATE_SETTINGS: 'room:update-settings',
+  MATCH_CAN_START: 'match:can-start',
+  MATCH_START: 'match:start',
+  PLAYER_READY: 'player:ready',
+  PLAYER_UNREADY: 'player:unready',
+}

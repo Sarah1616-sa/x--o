@@ -30,8 +30,7 @@ export class MainMenu extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(2)
     this.startButton = this.createMenuButton('Start Game', () => {
-      this.scene.start('GameScene')
-    })
+    this.scene.start("LobbyScene");   })
 
     this.layoutMenu()
     this.scale.on('resize', this.layoutMenu, this)
