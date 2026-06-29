@@ -1017,21 +1017,19 @@ export class GameScene extends Phaser.Scene {
         return
       case 'CLAIM_CELL':
       case 'POWER_CLAIM':
+        this.applyClaimResult(result)
+        return
       case 'TRAP_TRIGGER':
-      case 'STEAL_APPLIED':
-        this.pendingCellIndex = null
-        this.createMark(result.cellIndex, result.team)
-        this.refreshResolvedMoveUI({ shouldLayoutBoard: true })
-        this.applyTurnResult(result.followUp)
+        this.applyTrapTriggerResult(result)
         return
-      case 'SHIELD_APPLIED':
-        this.createProtectedMarker(result.cellIndex)
-        this.refreshResolvedMoveUI({ shouldLayoutBoard: true })
-        this.applyTurnResult(result.followUp)
+      case 'APPLY_STEAL':
+        this.applyStealResult(result)
         return
-      case 'TRAP_PLACED':
-        this.refreshResolvedMoveUI()
-        this.applyTurnResult(result.followUp)
+      case 'APPLY_SHIELD':
+        this.applyShieldResult(result)
+        return
+      case 'PLACE_TRAP':
+        this.applyTrapPlacementResult(result)
         return
       case 'SWITCH_TURN':
         this.switchTurn()
@@ -1047,6 +1045,61 @@ export class GameScene extends Phaser.Scene {
       default:
         return
     }
+  }
+
+  applyClaimResult(result) {
+    const { cellIndex, team } = result
+    const row = Math.floor(cellIndex / 3)
+    const column = cellIndex % 3
+
+    this.board[row][column] = team
+    this.createMark(cellIndex, team)
+    this.pendingCellIndex = null
+    this.abilitySystem.consumeClaimAt(cellIndex)
+    this.refreshResolvedMoveUI({ shouldLayoutBoard: true })
+    this.applyBoardOutcome(team)
+  }
+
+  applyTrapTriggerResult(result) {
+    const { cellIndex, team } = result
+    const row = Math.floor(cellIndex / 3)
+    const column = cellIndex % 3
+
+    this.board[row][column] = team
+    this.createMark(cellIndex, team)
+    this.pendingCellIndex = null
+    this.abilitySystem.resolveTrapForPendingCell(cellIndex, this.currentPlayer)
+    this.refreshResolvedMoveUI({ shouldLayoutBoard: true })
+    this.applyBoardOutcome(team)
+  }
+
+  applyStealResult(result) {
+    const { cellIndex, team } = result
+    const row = Math.floor(cellIndex / 3)
+    const column = cellIndex % 3
+
+    this.board[row][column] = team
+    this.createMark(cellIndex, team)
+    this.abilitySystem.consumeSteal(this.currentPlayer, cellIndex)
+    this.refreshResolvedMoveUI({ shouldLayoutBoard: true })
+    this.applyBoardOutcome(team)
+  }
+
+  applyShieldResult(result) {
+    this.abilitySystem.consumeShield(this.currentPlayer, result.cellIndex)
+    this.createProtectedMarker(result.cellIndex)
+    this.refreshResolvedMoveUI({ shouldLayoutBoard: true })
+    this.applyTurnResult(this.turnResolver.createSwitchTurnResult('SHIELD_APPLIED'))
+  }
+
+  applyTrapPlacementResult(result) {
+    this.abilitySystem.consumeTrapPlacement(this.currentPlayer, result.cellIndex)
+    this.refreshResolvedMoveUI()
+    this.applyTurnResult(this.turnResolver.createSwitchTurnResult('TRAP_PLACED'))
+  }
+
+  applyBoardOutcome(team) {
+    this.applyTurnResult(this.turnResolver.resolveBoardOutcome(this.board, team))
   }
 
   refreshResolvedMoveUI({ shouldLayoutBoard = false } = {}) {

@@ -19,7 +19,7 @@ export class TurnResolver {
     }
 
     if (this.abilitySystem.trapArmedTeam === currentPlayer) {
-      return this.resolveTrapPlacement({ index, board, currentPlayer })
+      return this.resolveTrapPlacement({ index, board })
     }
 
     if (!this.isSquareEmpty(board, index)) {
@@ -27,12 +27,11 @@ export class TurnResolver {
     }
 
     if (this.abilitySystem.powerArmedTeam === currentPlayer) {
-      return this.resolveClaim({
+      return {
         type: 'POWER_CLAIM',
-        board,
         cellIndex: index,
         team: currentPlayer,
-      })
+      }
     }
 
     return {
@@ -46,23 +45,21 @@ export class TurnResolver {
       return null
     }
 
-    const trapResolution = this.abilitySystem.resolveTrapForPendingCell(pendingCellIndex, currentPlayer)
+    const trapOwner = this.abilitySystem.trapSquares.get(pendingCellIndex)
 
-    if (trapResolution.triggered) {
-      return this.resolveClaim({
+    if (trapOwner && trapOwner !== currentPlayer && this.abilitySystem.canFutureAbilityModifySquare(pendingCellIndex)) {
+      return {
         type: 'TRAP_TRIGGER',
-        board,
         cellIndex: pendingCellIndex,
-        team: trapResolution.trapOwner,
-      })
+        team: trapOwner,
+      }
     }
 
-    return this.resolveClaim({
+    return {
       type: 'CLAIM_CELL',
-      board,
       cellIndex: pendingCellIndex,
       team: currentPlayer,
-    })
+    }
   }
 
   resolveIncorrectAnswer() {
@@ -81,14 +78,11 @@ export class TurnResolver {
       }
     }
 
-    this.abilitySystem.consumeSteal(currentPlayer, index)
-
-    return this.resolveClaim({
-      type: 'STEAL_APPLIED',
-      board,
+    return {
+      type: 'APPLY_STEAL',
       cellIndex: index,
       team: currentPlayer,
-    })
+    }
   }
 
   resolveShield({ index, board, currentPlayer }) {
@@ -99,17 +93,14 @@ export class TurnResolver {
       }
     }
 
-    this.abilitySystem.consumeShield(currentPlayer, index)
-
     return {
-      type: 'SHIELD_APPLIED',
+      type: 'APPLY_SHIELD',
       cellIndex: index,
       team: currentPlayer,
-      followUp: this.createSwitchTurnResult('SHIELD_APPLIED'),
     }
   }
 
-  resolveTrapPlacement({ index, board, currentPlayer }) {
+  resolveTrapPlacement({ index, board }) {
     if (!this.isSquareEmpty(board, index) || this.abilitySystem.trapSquares.has(index)) {
       return {
         type: 'INVALID_TARGET',
@@ -117,28 +108,9 @@ export class TurnResolver {
       }
     }
 
-    this.abilitySystem.consumeTrapPlacement(currentPlayer, index)
-
     return {
-      type: 'TRAP_PLACED',
+      type: 'PLACE_TRAP',
       cellIndex: index,
-      team: currentPlayer,
-      followUp: this.createSwitchTurnResult('TRAP_PLACED'),
-    }
-  }
-
-  resolveClaim({ type, board, cellIndex, team }) {
-    this.setSquareOwner(board, cellIndex, team)
-
-    if (type === 'CLAIM_CELL' || type === 'POWER_CLAIM') {
-      this.abilitySystem.consumeClaimAt(cellIndex)
-    }
-
-    return {
-      type,
-      cellIndex,
-      team,
-      followUp: this.resolveBoardOutcome(board, team),
     }
   }
 
@@ -164,13 +136,6 @@ export class TurnResolver {
       type: 'SWITCH_TURN',
       reason,
     }
-  }
-
-  setSquareOwner(board, index, team) {
-    const row = Math.floor(index / 3)
-    const column = index % 3
-
-    board[row][column] = team
   }
 
   isSquareEmpty(board, index) {
