@@ -1,8 +1,24 @@
 import Phaser from 'phaser'
+import { QUESTION_BANK } from '../data/questions.js'
+import { ABILITY_NAMES } from '../constants/abilityNames.js'
+import { MAX_STAGES, QUESTION_TIME_LIMIT } from '../constants/gameConstants.js'
+import { QuestionSystem } from '../systems/QuestionSystem.js'
+import { MatchSystem } from '../systems/MatchSystem.js'
+import { AbilitySystem } from '../systems/AbilitySystem.js'
+import { TurnResolver } from '../systems/TurnResolver.js'
+import { BoardUI } from '../ui/BoardUI.js'
+import { QuestionPanelUI } from '../ui/QuestionPanelUI.js'
+import { AbilityBarUI } from '../ui/AbilityBarUI.js'
+import { TeamPanelUI } from '../ui/TeamPanelUI.js'
+import { MatchInfoUI } from '../ui/MatchInfoUI.js'
+import { MatchEndUI } from '../ui/MatchEndUI.js'
 
 export class GameScene extends Phaser.Scene {
   constructor() {
     super('GameScene')
+    this.bindAbilityState()
+    this.bindMatchState()
+    this.bindQuestionState()
   }
 
   create() {
@@ -10,195 +26,76 @@ export class GameScene extends Phaser.Scene {
     this.gridGraphics = this.add.graphics()
     this.backgroundGraphics.setDepth(0)
     this.gridGraphics.setDepth(3)
+    this.boardUI = new BoardUI(this, this.gridGraphics)
+    this.abilityBarUI = new AbilityBarUI(this, {
+      setTextWrap: this.setTextWrap.bind(this),
+    })
+    this.teamPanelUI = new TeamPanelUI(this, {
+      drawLocalCard: this.drawLocalCard.bind(this),
+      createPanelHeading: this.createPanelHeading.bind(this),
+      setTextWrap: this.setTextWrap.bind(this),
+    })
+    this.matchInfoUI = new MatchInfoUI(this, {
+      drawLocalCard: this.drawLocalCard.bind(this),
+    })
+    this.matchEndUI = new MatchEndUI(this)
+    this.questionPanelUI = new QuestionPanelUI(this, {
+      drawLocalCard: this.drawLocalCard.bind(this),
+      createPanelHeading: this.createPanelHeading.bind(this),
+      createPanelText: this.createPanelText.bind(this),
+      setTextWrap: this.setTextWrap.bind(this),
+    })
     this.board = this.createEmptyBoard()
-    this.cells = []
+    this.cells = this.boardUI.createCells((index) => {
+      this.handleCellClick(index)
+    })
     this.marks = []
+    this.questionSystem = new QuestionSystem({
+      questionBank: QUESTION_BANK,
+      questionTimeLimit: QUESTION_TIME_LIMIT,
+    })
+    this.matchSystem = new MatchSystem({
+      maxStages: MAX_STAGES,
+    })
+    this.abilitySystem = new AbilitySystem()
     this.currentPlayer = 'X'
-    this.stageLocked = false
-    this.questionOpen = false
     this.pendingCellIndex = null
-    this.teamAnswers = this.createTeamAnswerState()
-    this.answerStatusLabels = {}
     this.questionTimerEvent = null
-    this.questionModal = null
-    this.questionTimerText = null
-    this.matchEndOverlay = null
-    this.questionTimeRemaining = 15
-    this.questionIndex = 0
-    this.questionBank = this.createQuestionBank()
     this.winningLines = this.createWinningLines()
-    this.powerRemaining = {
-      X: 1,
-      O: 1,
-    }
-    this.powerArmedTeam = null
-    this.shieldRemaining = {
-      X: 1,
-      O: 1,
-    }
-    this.shieldArmedTeam = null
-    this.stealRemaining = {
-      X: 1,
-      O: 1,
-    }
-    this.stealArmedTeam = null
-    this.trapRemaining = {
-      X: 1,
-      O: 1,
-    }
-    this.trapArmedTeam = null
-    this.trapSquares = new Map()
-    this.protectedSquares = new Set()
+    this.turnResolver = new TurnResolver({
+      abilitySystem: this.abilitySystem,
+      matchSystem: this.matchSystem,
+      winningLines: this.winningLines,
+    })
     this.protectedMarkers = []
-    this.currentStage = 1
-    this.maxStages = 5
-    this.stageScores = {
-      X: 0,
-      O: 0,
-    }
-    this.matchComplete = false
+    Object.assign(this, this.matchInfoUI.createUI())
+    Object.assign(this, this.teamPanelUI.createUI())
 
-    this.title = this.add
-      .text(0, 0, 'لعبة الغموض XO', {
-        color: '#ff3355',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '32px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-      .setShadow(0, 0, '#ff003c', 12, true, true)
-
-    this.turnLabel = this.add
-      .text(0, 0, '', {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '22px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.stageLabel = this.add
-      .text(0, 0, '', {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '18px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.teamXScoreLabel = this.add
-      .text(0, 0, '', {
-        color: '#ff3355',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '18px',
-        align: 'left',
-        rtl: true,
-      })
-      .setOrigin(0, 0.5)
-
-    this.teamOScoreLabel = this.add
-      .text(0, 0, '', {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '18px',
-        align: 'right',
-        rtl: true,
-      })
-      .setOrigin(1, 0.5)
-
-    this.powerCountsLabel = this.add
-      .text(0, 0, '', {
-        color: '#f9d65c',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.shieldCountsLabel = this.add
-      .text(0, 0, '', {
-        color: '#7dd3fc',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.stealCountsLabel = this.add
-      .text(0, 0, '', {
-        color: '#34d399',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.trapCountsLabel = this.add
-      .text(0, 0, '', {
-        color: '#fb923c',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.powerStatusLabel = this.add
-      .text(0, 0, '', {
-        color: '#f9d65c',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.powerButton = this.createPowerButton()
-
-    this.shieldStatusLabel = this.add
-      .text(0, 0, '', {
-        color: '#7dd3fc',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.shieldButton = this.createShieldButton()
-
-    this.stealStatusLabel = this.add
-      .text(0, 0, '', {
-        color: '#34d399',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.stealButton = this.createStealButton()
-
-    this.trapStatusLabel = this.add
-      .text(0, 0, '', {
-        color: '#fb923c',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.trapButton = this.createTrapButton()
+    Object.assign(
+      this,
+      this.abilityBarUI.createUI({
+        onActivatePower: () => this.activatePower(),
+        onActivateShield: () => this.activateShield(),
+        onActivateSteal: () => this.activateSteal(),
+        onActivateTrap: () => this.activateTrap(),
+      }),
+    )
+    this.abilityBarUI.bindReferences({
+      powerCountsLabel: this.powerCountsLabel,
+      shieldCountsLabel: this.shieldCountsLabel,
+      stealCountsLabel: this.stealCountsLabel,
+      trapCountsLabel: this.trapCountsLabel,
+      powerStatusLabel: this.powerStatusLabel,
+      shieldStatusLabel: this.shieldStatusLabel,
+      stealStatusLabel: this.stealStatusLabel,
+      trapStatusLabel: this.trapStatusLabel,
+      powerButton: this.powerButton,
+      shieldButton: this.shieldButton,
+      stealButton: this.stealButton,
+      trapButton: this.trapButton,
+    })
 
     this.createLayoutContainers()
-    this.createCells()
     this.updateTurnLabel()
     this.updateStageLabel()
     this.updateShieldCountsLabel()
@@ -236,166 +133,229 @@ export class GameScene extends Phaser.Scene {
     ]
   }
 
-  createQuestionBank() {
-    return [
-      {
-        question: 'ما عاصمة المملكة العربية السعودية؟',
-        options: ['جدة', 'الرياض', 'مكة', 'الدمام'],
-        correctAnswerIndex: 1,
+  bindAbilityState() {
+    Object.defineProperties(this, {
+      powerRemaining: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.powerRemaining ?? { X: 1, O: 1 },
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.powerRemaining = value
+          }
+        },
       },
-      {
-        question: 'كم عدد أيام السنة الميلادية العادية؟',
-        options: ['360', '365', '366', '364'],
-        correctAnswerIndex: 1,
+      powerArmedTeam: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.powerArmedTeam ?? null,
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.powerArmedTeam = value
+          }
+        },
       },
-      {
-        question: 'ما الكوكب المعروف بالكوكب الأحمر؟',
-        options: ['الزهرة', 'المريخ', 'المشتري', 'عطارد'],
-        correctAnswerIndex: 1,
+      protectedSquares: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.protectedSquares ?? new Set(),
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.protectedSquares = value
+          }
+        },
       },
-      {
-        question: 'كم عدد ألوان قوس قزح؟',
-        options: ['5', '6', '7', '8'],
-        correctAnswerIndex: 2,
+      shieldArmedTeam: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.shieldArmedTeam ?? null,
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.shieldArmedTeam = value
+          }
+        },
       },
-      {
-        question: 'ما الغاز الذي نتنفسه للبقاء على قيد الحياة؟',
-        options: ['الأكسجين', 'الهيدروجين', 'النيتروجين', 'ثاني أكسيد الكربون'],
-        correctAnswerIndex: 0,
+      shieldRemaining: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.shieldRemaining ?? { X: 1, O: 1 },
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.shieldRemaining = value
+          }
+        },
       },
-      {
-        question: 'ما الحيوان الذي يلقب بسفينة الصحراء؟',
-        options: ['الحصان', 'الجمل', 'الفيل', 'الغزال'],
-        correctAnswerIndex: 1,
+      stealArmedTeam: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.stealArmedTeam ?? null,
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.stealArmedTeam = value
+          }
+        },
       },
-      {
-        question: 'كم عدد اللاعبين في فريق كرة القدم داخل الملعب؟',
-        options: ['9', '10', '11', '12'],
-        correctAnswerIndex: 2,
+      stealRemaining: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.stealRemaining ?? { X: 1, O: 1 },
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.stealRemaining = value
+          }
+        },
       },
-      {
-        question: 'كم عدد أشواط مباراة كرة القدم؟',
-        options: ['شوط واحد', 'شوطان', 'ثلاثة أشواط', 'أربعة أشواط'],
-        correctAnswerIndex: 1,
+      trapArmedTeam: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.trapArmedTeam ?? null,
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.trapArmedTeam = value
+          }
+        },
       },
-      {
-        question: 'في أي رياضة يستخدم المضرب والكرة الصفراء؟',
-        options: ['كرة السلة', 'التنس', 'السباحة', 'الملاكمة'],
-        correctAnswerIndex: 1,
+      trapRemaining: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.trapRemaining ?? { X: 1, O: 1 },
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.trapRemaining = value
+          }
+        },
       },
-      {
-        question: 'كم عدد الحلقات في شعار الألعاب الأولمبية؟',
-        options: ['4', '5', '6', '7'],
-        correctAnswerIndex: 1,
+      trapSquares: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.abilitySystem?.trapSquares ?? new Map(),
+        set: (value) => {
+          if (this.abilitySystem) {
+            this.abilitySystem.trapSquares = value
+          }
+        },
       },
-      {
-        question: 'ما الرياضة التي يشتهر فيها مصطلح الضربة الساحقة؟',
-        options: ['الكرة الطائرة', 'الجولف', 'الرماية', 'الشطرنج'],
-        correctAnswerIndex: 0,
-      },
-      {
-        question: 'أي رياضة تقام عادة في حوض مائي؟',
-        options: ['التزلج', 'السباحة', 'كرة اليد', 'ركوب الدراجات'],
-        correctAnswerIndex: 1,
-      },
-      {
-        question: 'من الشخصية الكرتونية المعروفة بارتداء قفازات بيضاء وأذنين دائريتين؟',
-        options: ['سبونج بوب', 'ميكي ماوس', 'توم', 'باغز باني'],
-        correctAnswerIndex: 1,
-      },
-      {
-        question: 'ما الآلة الموسيقية التي تحتوي على مفاتيح بيضاء وسوداء؟',
-        options: ['العود', 'البيانو', 'الناي', 'الطبلة'],
-        correctAnswerIndex: 1,
-      },
-      {
-        question: 'ما نوع العمل الفني الذي يعرض على خشبة أمام الجمهور؟',
-        options: ['مسرحية', 'رواية', 'لوحة', 'بودكاست'],
-        correctAnswerIndex: 0,
-      },
-      {
-        question: 'ما اسم الجوائز السينمائية العالمية الشهيرة التي تمنح في هوليوود؟',
-        options: ['الأوسكار', 'نوبل', 'غرامي', 'إيمي'],
-        correctAnswerIndex: 0,
-      },
-      {
-        question: 'أي منصة اشتهرت بمقاطع الفيديو القصيرة؟',
-        options: ['تيك توك', 'ويكيبيديا', 'لينكدإن', 'خرائط جوجل'],
-        correctAnswerIndex: 0,
-      },
-      {
-        question: 'ما اللون الناتج من خلط الأحمر والأزرق؟',
-        options: ['الأخضر', 'البرتقالي', 'البنفسجي', 'الأصفر'],
-        correctAnswerIndex: 2,
-      },
-      {
-        question: 'في أي مدينة تقع الأهرامات؟',
-        options: ['الإسكندرية', 'القاهرة', 'الجيزة', 'الأقصر'],
-        correctAnswerIndex: 2,
-      },
-      {
-        question: 'من هو أول الخلفاء الراشدين؟',
-        options: ['عمر بن الخطاب', 'أبو بكر الصديق', 'عثمان بن عفان', 'علي بن أبي طالب'],
-        correctAnswerIndex: 1,
-      },
-      {
-        question: 'في أي عام تأسست المملكة العربية السعودية الحديثة؟',
-        options: ['1902', '1927', '1932', '1953'],
-        correctAnswerIndex: 2,
-      },
-      {
-        question: 'ما الحضارة القديمة التي بنت الأهرامات؟',
-        options: ['الرومانية', 'المصرية', 'الفارسية', 'الإغريقية'],
-        correctAnswerIndex: 1,
-      },
-      {
-        question: 'من القائد الذي فتح القسطنطينية عام 1453؟',
-        options: ['صلاح الدين الأيوبي', 'محمد الفاتح', 'هارون الرشيد', 'طارق بن زياد'],
-        correctAnswerIndex: 1,
-      },
-      {
-        question: 'ما اسم الطريق التجاري القديم الذي ربط الشرق بالغرب؟',
-        options: ['طريق الحرير', 'طريق البخور', 'طريق الأطلسي', 'طريق القوافل'],
-        correctAnswerIndex: 0,
-      },
-      {
-        question: 'ما أكبر قارة في العالم؟',
-        options: ['أفريقيا', 'آسيا', 'أوروبا', 'أمريكا الجنوبية'],
-        correctAnswerIndex: 1,
-      },
-      {
-        question: 'ما أطول نهر في العالم غالبا؟',
-        options: ['النيل', 'الأمازون', 'الفرات', 'الدانوب'],
-        correctAnswerIndex: 0,
-      },
-      {
-        question: 'ما المحيط الأكبر مساحة؟',
-        options: ['الأطلسي', 'الهندي', 'الهادئ', 'المتجمد الشمالي'],
-        correctAnswerIndex: 2,
-      },
-      {
-        question: 'ما عاصمة اليابان؟',
-        options: ['سيول', 'طوكيو', 'بكين', 'بانكوك'],
-        correctAnswerIndex: 1,
-      },
-      {
-        question: 'في أي قارة تقع البرازيل؟',
-        options: ['أوروبا', 'آسيا', 'أمريكا الجنوبية', 'أفريقيا'],
-        correctAnswerIndex: 2,
-      },
-      {
-        question: 'ما الدولة التي تضم مدينتي مكة والمدينة؟',
-        options: ['الإمارات', 'السعودية', 'مصر', 'الأردن'],
-        correctAnswerIndex: 1,
-      },
-    ]
+    })
   }
 
-  createTeamAnswerState() {
-    return {
-      captain: null,
-      partner: null,
-    }
+  bindMatchState() {
+    Object.defineProperties(this, {
+      currentStage: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.matchSystem?.currentStage ?? 1,
+        set: (value) => {
+          if (this.matchSystem) {
+            this.matchSystem.currentStage = value
+          }
+        },
+      },
+      matchComplete: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.matchSystem?.matchComplete ?? false,
+        set: (value) => {
+          if (this.matchSystem) {
+            this.matchSystem.matchComplete = value
+          }
+        },
+      },
+      maxStages: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.matchSystem?.maxStages ?? MAX_STAGES,
+        set: (value) => {
+          if (this.matchSystem) {
+            this.matchSystem.maxStages = value
+          }
+        },
+      },
+      stageLocked: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.matchSystem?.stageLocked ?? false,
+        set: (value) => {
+          if (this.matchSystem) {
+            this.matchSystem.stageLocked = value
+          }
+        },
+      },
+      stageScores: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.matchSystem?.stageScores ?? { X: 0, O: 0 },
+        set: (value) => {
+          if (this.matchSystem) {
+            this.matchSystem.stageScores = value
+          }
+        },
+      },
+    })
+  }
+
+  bindQuestionState() {
+    Object.defineProperties(this, {
+      activeQuestion: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.questionSystem?.activeQuestion ?? null,
+        set: (value) => {
+          if (this.questionSystem) {
+            this.questionSystem.activeQuestion = value
+          }
+        },
+      },
+      questionBank: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.questionSystem?.questionBank ?? [],
+        set: (value) => {
+          if (this.questionSystem) {
+            this.questionSystem.questionBank = value
+          }
+        },
+      },
+      questionIndex: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.questionSystem?.questionIndex ?? 0,
+        set: (value) => {
+          if (this.questionSystem) {
+            this.questionSystem.questionIndex = value
+          }
+        },
+      },
+      questionOpen: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.questionSystem?.questionOpen ?? false,
+        set: (value) => {
+          if (this.questionSystem) {
+            this.questionSystem.questionOpen = value
+          }
+        },
+      },
+      questionTimeRemaining: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.questionSystem?.questionTimeRemaining ?? QUESTION_TIME_LIMIT,
+        set: (value) => {
+          if (this.questionSystem) {
+            this.questionSystem.questionTimeRemaining = value
+          }
+        },
+      },
+      teamAnswers: {
+        configurable: true,
+        enumerable: true,
+        get: () => this.questionSystem?.teamAnswers ?? { captain: null, partner: null },
+        set: (value) => {
+          if (this.questionSystem) {
+            this.questionSystem.teamAnswers = value
+          }
+        },
+      },
+    })
   }
 
   createLayoutContainers() {
@@ -404,18 +364,19 @@ export class GameScene extends Phaser.Scene {
     this.leftPanel = this.createPanelContainer(5)
     this.rightPanel = this.createPanelContainer(5)
     this.bottomPanel = this.createPanelContainer(5)
-
-    this.currentTeamHeading = this.createPanelHeading('الفريق الحالي')
-    this.resourcesHeading = this.createPanelHeading('الموارد')
-    this.abilityStatusHeading = this.createPanelHeading('حالة القدرات')
-    this.questionAreaHeading = this.createPanelHeading('منطقة السؤال')
-    this.questionIdleText = this.createPanelText('بانتظار اختيار خانة من اللوحة', 15, '#cbd5e1')
-    this.questionTimerIdleText = this.createPanelText('المؤقت: --', 15, '#f9d65c')
-    this.questionResultHeading = this.createPanelHeading('النتيجة')
-    this.questionResultLabel = this.createPanelText('النتيجة: بانتظار السؤال', 15, '#ffffff')
-
-    this.topBarPanel.container.add([this.title, this.stageLabel, this.teamXScoreLabel, this.teamOScoreLabel])
+    this.topBarPanel.container.add([
+      this.stageCardGraphics,
+      this.teamXCardGraphics,
+      this.teamOCardGraphics,
+      this.title,
+      this.stageLabel,
+      this.teamXScoreLabel,
+      this.teamOScoreLabel,
+    ])
     this.leftPanel.container.add([
+      this.currentTeamCardGraphics,
+      this.resourceCardGraphics,
+      this.statusCardGraphics,
       this.currentTeamHeading,
       this.turnLabel,
       this.resourcesHeading,
@@ -429,13 +390,7 @@ export class GameScene extends Phaser.Scene {
       this.stealStatusLabel,
       this.trapStatusLabel,
     ])
-    this.rightPanel.container.add([
-      this.questionAreaHeading,
-      this.questionIdleText,
-      this.questionTimerIdleText,
-      this.questionResultHeading,
-      this.questionResultLabel,
-    ])
+    this.rightPanel.container.add(this.questionPanelUI.createSidebarElements())
     this.bottomPanel.container.add([this.powerButton, this.shieldButton, this.stealButton, this.trapButton])
   }
 
@@ -502,6 +457,25 @@ export class GameScene extends Phaser.Scene {
     graphics.fillRect(18, 0, Math.max(0, width - 36), 3)
   }
 
+  drawLocalCard(graphics, x, y, width, height, options = {}) {
+    const fillColor = options.fillColor ?? 0x0b1220
+    const fillAlpha = options.fillAlpha ?? 0.84
+    const strokeColor = options.strokeColor ?? 0xff3355
+    const strokeAlpha = options.strokeAlpha ?? 0.45
+    const radius = options.radius ?? 8
+
+    graphics.clear()
+    graphics.fillStyle(fillColor, fillAlpha)
+    graphics.fillRoundedRect(x, y, width, height, radius)
+    graphics.lineStyle(1, strokeColor, strokeAlpha)
+    graphics.strokeRoundedRect(x + 0.5, y + 0.5, width - 1, height - 1, radius)
+
+    if (options.accent !== false) {
+      graphics.fillStyle(strokeColor, 0.92)
+      graphics.fillRect(x + 12, y, Math.max(0, width - 24), 2)
+    }
+  }
+
   setTextWrap(textObject, width) {
     if (textObject && textObject.setWordWrapWidth) {
       textObject.setWordWrapWidth(Math.max(120, width))
@@ -509,106 +483,36 @@ export class GameScene extends Phaser.Scene {
   }
 
   setQuestionIdleVisible(isVisible) {
-    if (this.questionIdleText) {
-      this.questionIdleText.setVisible(isVisible)
-    }
-
-    if (this.questionTimerIdleText) {
-      this.questionTimerIdleText.setVisible(isVisible)
-    }
+    this.questionPanelUI.setIdleVisible(isVisible)
   }
 
   updateQuestionResult(message) {
-    if (this.questionResultLabel) {
-      this.questionResultLabel.setText(message)
-    }
+    this.questionPanelUI.setResultText(message)
   }
 
-  createCells() {
-    // Each transparent rectangle is an input target for one board cell.
-    for (let index = 0; index < 9; index += 1) {
-      const cell = this.add
-        .rectangle(0, 0, 1, 1, 0x000000, 0)
-        .setOrigin(0)
-        .setDepth(4)
-        .setInteractive({ useHandCursor: true })
-
-      cell.on('pointerdown', () => {
-        this.handleCellClick(index)
-      })
-
-      this.cells.push(cell)
-    }
+  updateAnswerButtonStates(role) {
+    this.questionPanelUI.updateAnswerButtonStates(role, this.teamAnswers[role])
   }
 
   handleCellClick(index) {
-    const row = Math.floor(index / 3)
-    const column = index % 3
-
-    if (this.matchComplete || this.stageLocked || this.questionOpen) {
-      return
-    }
-
-    if (this.stealArmedTeam === this.currentPlayer) {
-      this.applyStealToCell(index)
-      return
-    }
-
-    if (this.shieldArmedTeam === this.currentPlayer) {
-      this.applyShieldToCell(index)
-      return
-    }
-
-    if (this.trapArmedTeam === this.currentPlayer) {
-      this.applyTrapToCell(index)
-      return
-    }
-
-    if (this.board[row][column] !== null) {
-      return
-    }
-
-    if (this.powerArmedTeam === this.currentPlayer) {
-      this.claimCellAtIndex(index)
-      return
-    }
-
-    this.pendingCellIndex = index
-    this.showQuestionModal(this.getNextQuestion())
+    this.applyTurnResult(
+      this.turnResolver.handleCellClick({
+        index,
+        board: this.board,
+        currentPlayer: this.currentPlayer,
+        matchComplete: this.matchComplete,
+        stageLocked: this.stageLocked,
+        questionOpen: this.questionOpen,
+      }),
+    )
   }
 
   createMark(index, player) {
-    if (this.marks[index]) {
-      this.marks[index].destroy()
-    }
-
-    const mark = this.add
-      .text(0, 0, player, {
-        color: player === 'X' ? '#ff3355' : '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '72px',
-        fontStyle: 'bold',
-      })
-      .setOrigin(0.5)
-      .setDepth(4)
-
-    this.marks[index] = mark
-  }
-
-  getNextQuestion() {
-    const question = this.questionBank[this.questionIndex % this.questionBank.length]
-
-    this.questionIndex += 1
-
-    return question
+    this.boardUI.createMark(this.marks, index, player)
   }
 
   showQuestionModal(question) {
-    this.questionOpen = true
-    this.activeQuestion = question
-    this.teamAnswers = this.createTeamAnswerState()
-    this.answerStatusLabels = {}
-    this.questionTimeRemaining = 15
+    this.questionSystem.openQuestion(question)
     this.setQuestionIdleVisible(false)
     this.updateQuestionResult('النتيجة: بانتظار الإجابات')
 
@@ -617,215 +521,67 @@ export class GameScene extends Phaser.Scene {
   }
 
   renderQuestionPanel(question) {
-    if (!this.rightPanel) {
-      return
-    }
-
-    if (this.questionModal) {
-      this.questionModal.destroy()
-    }
-
-    this.answerStatusLabels = {}
-
-    const { panelWidth, panelHeight, x, y } = this.getQuestionPanelMetrics()
-
-    this.questionModal = this.add.container(x, y)
-
-    const panel = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x0b1220, 0.96).setStrokeStyle(1, 0xff3355, 0.35)
-    const questionText = this.add
-      .text(0, -panelHeight / 2 + 42, question.question, {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '17px',
-        align: 'right',
-        rtl: true,
-        wordWrap: { width: panelWidth - 34 },
-      })
-      .setOrigin(0.5)
-    this.questionTimerText = this.add
-      .text(0, -panelHeight / 2 + 82, `الوقت: ${this.questionTimeRemaining}`, {
-        color: '#f9d65c',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    const sectionWidth = panelWidth - 34
-    const firstSectionY = -panelHeight / 2 + 124
-    const secondSectionY = firstSectionY + Math.min(210, Math.max(184, panelHeight * 0.33))
-
-    this.questionModal.add([panel, questionText, this.questionTimerText])
-    this.createAnswerSection('captain', 'إجابة الكابتن', 0, firstSectionY, sectionWidth, question)
-    this.createAnswerSection('partner', 'إجابة الشريك', 0, secondSectionY, sectionWidth, question)
-    this.questionModal.add(this.createSubmitButton(panelHeight))
-    this.rightPanel.container.add(this.questionModal)
+    this.questionPanelUI.renderQuestionPanel({
+      rightPanel: this.rightPanel,
+      question,
+      questionTimeRemaining: this.questionTimeRemaining,
+      onSelectAnswer: (role, answerIndex) => {
+        this.selectTeamAnswer(role, answerIndex)
+      },
+      onSubmit: () => {
+        this.submitTeamAnswers()
+      },
+    })
     this.refreshSelectedAnswerLabels()
   }
 
-  getQuestionPanelMetrics() {
-    const panelWidth = Math.max(280, this.rightPanel.width - 34)
-    const panelHeight = Math.max(500, this.rightPanel.height - 190)
-
-    return {
-      panelWidth,
-      panelHeight,
-      x: this.rightPanel.width / 2,
-      y: 74 + panelHeight / 2,
-    }
-  }
-
   refreshSelectedAnswerLabels() {
-    Object.keys(this.answerStatusLabels).forEach((role) => {
-      if (this.teamAnswers[role] !== null) {
-        this.updateSelectedAnswerLabel(role)
-      }
-    })
-  }
-
-  createAnswerSection(role, title, x, y, sectionWidth, question) {
-    const heading = this.add
-      .text(x, y, title, {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-    const selectedText = this.add
-      .text(x, y + 26, 'الاختيار: لا يوجد', {
-        color: '#cbd5e1',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '14px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    this.answerStatusLabels[role] = selectedText
-    this.questionModal.add([heading, selectedText])
-
-    question.options.forEach((option, answerIndex) => {
-      const button = this.createAnswerButton(role, option, answerIndex, x, y + 56 + answerIndex * 38, sectionWidth)
-
-      this.questionModal.add(button)
-    })
-  }
-
-  createAnswerButton(role, choice, answerIndex, x, y, buttonWidth) {
-    const button = this.add.container(x, y)
-    const background = this.add
-      .rectangle(0, 0, buttonWidth, 34, 0x1f2937, 1)
-      .setStrokeStyle(1, 0xff3355, 0.35)
-      .setInteractive({ useHandCursor: true })
-    const label = this.add
-      .text(0, 0, choice, {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '14px',
-        align: 'right',
-        rtl: true,
-        wordWrap: { width: buttonWidth - 16 },
-      })
-      .setOrigin(0.5)
-
-    background.on('pointerdown', () => {
-      this.selectTeamAnswer(role, answerIndex)
-    })
-
-    button.add([background, label])
-
-    return button
-  }
-
-  createSubmitButton(panelHeight) {
-    const button = this.add.container(0, panelHeight / 2 - 46)
-    const background = this.add
-      .rectangle(0, 0, 220, 42, 0xff3355, 1)
-      .setInteractive({ useHandCursor: true })
-    const label = this.add
-      .text(0, 0, 'إرسال الإجابات', {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    background.on('pointerdown', () => {
-      this.submitTeamAnswers()
-    })
-
-    button.add([background, label])
-
-    return button
+    this.questionPanelUI.refreshSelectedAnswers(this.teamAnswers, (role) => this.questionSystem.getSelectedChoice(role))
   }
 
   selectTeamAnswer(role, answerIndex) {
-    if (!this.questionOpen) {
+    if (!this.questionSystem.setTeamAnswer(role, answerIndex)) {
       return
     }
-
-    this.teamAnswers[role] = answerIndex
     this.updateSelectedAnswerLabel(role)
   }
 
   updateSelectedAnswerLabel(role) {
-    const answerIndex = this.teamAnswers[role]
-    const choice = this.activeQuestion.options[answerIndex]
-    const label = role === 'captain' ? 'الكابتن' : 'الشريك'
-
-    this.answerStatusLabels[role].setText(`${label}: ${choice}`)
+    const choice = this.questionSystem.getSelectedChoice(role)
+    this.questionPanelUI.updateSelectedAnswer(role, choice)
+    this.updateAnswerButtonStates(role)
   }
 
   submitTeamAnswers() {
-    if (!this.questionOpen || !this.hasBothTeamAnswers()) {
+    if (!this.questionOpen || !this.questionSystem.hasBothTeamAnswers()) {
       return
     }
 
     this.stopQuestionTimer()
-    const isCorrect = this.areTeamAnswersCorrect()
+    const isCorrect = this.questionSystem.areTeamAnswersCorrect()
 
     this.updateQuestionResult(isCorrect ? 'النتيجة: إجابة صحيحة' : 'النتيجة: إجابة غير صحيحة')
     this.closeQuestionModal()
 
     if (isCorrect) {
-      this.claimPendingCell()
+      this.applyTurnResult(
+        this.turnResolver.resolvePendingCell({
+          board: this.board,
+          pendingCellIndex: this.pendingCellIndex,
+          currentPlayer: this.currentPlayer,
+        }),
+      )
       return
     }
 
     this.pendingCellIndex = null
-    this.switchTurn()
-  }
-
-  hasBothTeamAnswers() {
-    return this.teamAnswers.captain !== null && this.teamAnswers.partner !== null
-  }
-
-  areTeamAnswersCorrect() {
-    const correctAnswerIndex = this.activeQuestion.correctAnswerIndex
-
-    return (
-      this.hasBothTeamAnswers() &&
-      this.teamAnswers.captain === this.teamAnswers.partner &&
-      this.teamAnswers.captain === correctAnswerIndex
-    )
+    this.applyTurnResult(this.turnResolver.resolveIncorrectAnswer())
   }
 
   closeQuestionModal() {
     this.stopQuestionTimer()
-    this.questionOpen = false
-    if (this.questionModal) {
-      this.questionModal.destroy()
-    }
-    this.questionModal = null
-    this.questionTimerText = null
-    this.activeQuestion = null
-    this.teamAnswers = this.createTeamAnswerState()
-    this.answerStatusLabels = {}
+    this.questionPanelUI.destroyQuestionModal()
+    this.questionSystem.closeQuestion()
     this.setQuestionIdleVisible(true)
   }
 
@@ -852,12 +608,10 @@ export class GameScene extends Phaser.Scene {
       return
     }
 
-    this.questionTimeRemaining -= 1
-    if (this.questionTimerText) {
-      this.questionTimerText.setText(`الوقت: ${this.questionTimeRemaining}`)
-    }
+    const { expired, timeRemaining } = this.questionSystem.tickTimer()
+    this.questionPanelUI.updateTimerText(timeRemaining)
 
-    if (this.questionTimeRemaining <= 0) {
+    if (expired) {
       this.handleQuestionTimeout()
     }
   }
@@ -870,30 +624,11 @@ export class GameScene extends Phaser.Scene {
     this.pendingCellIndex = null
     this.updateQuestionResult('النتيجة: انتهى الوقت')
     this.closeQuestionModal()
-    this.switchTurn()
-  }
-
-  getStageWinner(player) {
-    return this.winningLines.some((line) =>
-      line.every((index) => {
-        const row = Math.floor(index / 3)
-        const column = index % 3
-
-        return this.board[row][column] === player
-      }),
-    )
-  }
-
-  isBoardFull() {
-    return this.board.every((row) => row.every((cell) => cell !== null))
-  }
-
-  hasAnyStageWinner() {
-    return this.getStageWinner('X') || this.getStageWinner('O')
+    this.applyTurnResult(this.turnResolver.resolveQuestionTimeout())
   }
 
   declareStageWinner(player) {
-    this.stageLocked = true
+    this.matchSystem.lockStage()
     this.turnLabel.setText(`فاز الفريق ${player} بالجولة`)
     this.awardStagePoint(player)
     this.updateAbilityUI()
@@ -904,7 +639,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   declareStageDraw() {
-    this.stageLocked = true
+    this.matchSystem.lockStage()
     this.turnLabel.setText('\u062A\u0639\u0627\u062F\u0644 \u0627\u0644\u062C\u0648\u0644\u0629')
     this.updateAbilityUI()
 
@@ -914,25 +649,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   awardStagePoint(player) {
-    this.stageScores[player] += 1
+    this.matchSystem.awardStagePoint(player)
     this.updateStageLabel()
   }
 
   advanceStageOrFinishMatch() {
-    if (this.currentStage >= this.maxStages) {
+    const { matchComplete } = this.matchSystem.advanceStageOrCompleteMatch()
+    if (matchComplete) {
       this.completeMatch()
       return
     }
 
-    this.currentStage += 1
     this.resetStage()
   }
 
   completeMatch() {
-    this.matchComplete = true
-    this.stageLocked = true
     this.updateAbilityUI()
-    const winner = this.getMatchWinner()
+    const winner = this.matchSystem.getMatchWinner()
 
     if (!winner) {
       this.turnLabel.setText('تعادل')
@@ -944,149 +677,31 @@ export class GameScene extends Phaser.Scene {
     this.showMatchEndScreen(winner)
   }
 
-  getMatchWinner() {
-    if (this.stageScores.X === this.stageScores.O) {
-      return null
-    }
-
-    return this.stageScores.X > this.stageScores.O ? 'X' : 'O'
-  }
-
   showMatchEndScreen(winner) {
-    this.hideMatchEndScreen()
-
-    const overlay = this.add.container(0, 0).setDepth(100)
-    const dim = this.add.rectangle(0, 0, 1, 1, 0x000000, 0.72).setOrigin(0).setInteractive()
-    const panel = this.add.graphics()
-    const title = this.add
-      .text(0, 0, 'انتهت المباراة', {
-        color: '#ff3355',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '34px',
-        fontStyle: 'bold',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-    const winnerLabel = this.add
-      .text(0, 0, winner ? `الفائز: الفريق ${winner}` : 'الفائز: تعادل', {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '24px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-    const scoreLabel = this.add
-      .text(0, 0, `النتيجة النهائية: X ${this.stageScores.X} - ${this.stageScores.O} O`, {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '20px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-    const playAgainButton = this.createMatchEndButton('Play Again', () => {
-      this.resetMatch()
+    this.matchEndUI.show({
+      winner,
+      stageScores: this.stageScores,
+      onPlayAgain: () => this.resetMatch(),
+      onReturnToMenu: () => this.returnToMainMenu(),
+      width: this.scale.width,
+      height: this.scale.height,
     })
-    const menuButton = this.createMatchEndButton('Return to Main Menu', () => {
-      this.returnToMainMenu()
-    })
-
-    overlay.add([dim, panel, title, winnerLabel, scoreLabel, playAgainButton, menuButton])
-    overlay.dim = dim
-    overlay.panel = panel
-    overlay.title = title
-    overlay.winnerLabel = winnerLabel
-    overlay.scoreLabel = scoreLabel
-    overlay.playAgainButton = playAgainButton
-    overlay.menuButton = menuButton
-    this.matchEndOverlay = overlay
-    this.layoutMatchEndOverlay(this.scale.width, this.scale.height)
-  }
-
-  createMatchEndButton(labelText, onClick) {
-    const button = this.add.container(0, 0)
-    const background = this.add
-      .rectangle(0, 0, 260, 44, 0x111827, 1)
-      .setStrokeStyle(1, 0xff3355, 0.9)
-      .setInteractive({ useHandCursor: true })
-    const label = this.add
-      .text(0, 0, labelText, {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '16px',
-        align: 'center',
-      })
-      .setOrigin(0.5)
-
-    background.on('pointerdown', onClick)
-    button.add([background, label])
-
-    return button
   }
 
   layoutMatchEndOverlay(width, height) {
-    if (!this.matchEndOverlay) {
-      return
-    }
-
-    const panelWidth = Math.min(560, width * 0.86)
-    const panelHeight = 350
-    const panelX = width / 2
-    const panelY = height / 2
-    const overlay = this.matchEndOverlay
-
-    overlay.dim.setSize(width, height)
-    overlay.panel.clear()
-    overlay.panel.fillStyle(0x070b14, 0.97)
-    overlay.panel.fillRoundedRect(panelX - panelWidth / 2, panelY - panelHeight / 2, panelWidth, panelHeight, 12)
-    overlay.panel.lineStyle(2, 0xff3355, 0.9)
-    overlay.panel.strokeRoundedRect(panelX - panelWidth / 2 + 1, panelY - panelHeight / 2 + 1, panelWidth - 2, panelHeight - 2, 12)
-    overlay.panel.lineStyle(1, 0xffffff, 0.12)
-    overlay.panel.strokeRoundedRect(panelX - panelWidth / 2 + 10, panelY - panelHeight / 2 + 10, panelWidth - 20, panelHeight - 20, 8)
-    overlay.title.setPosition(panelX, panelY - 112)
-    overlay.winnerLabel.setPosition(panelX, panelY - 54)
-    overlay.scoreLabel.setPosition(panelX, panelY - 14)
-    overlay.playAgainButton.setPosition(panelX, panelY + 68)
-    overlay.menuButton.setPosition(panelX, panelY + 126)
+    this.matchEndUI.layout(width, height)
   }
 
   hideMatchEndScreen() {
-    if (!this.matchEndOverlay) {
-      return
-    }
-
-    this.matchEndOverlay.destroy()
-    this.matchEndOverlay = null
+    this.matchEndUI.hide()
   }
 
   resetMatch() {
     this.hideMatchEndScreen()
     this.closeQuestionModal()
-    this.currentStage = 1
-    this.stageScores = {
-      X: 0,
-      O: 0,
-    }
-    this.powerRemaining = {
-      X: 1,
-      O: 1,
-    }
-    this.shieldRemaining = {
-      X: 1,
-      O: 1,
-    }
-    this.stealRemaining = {
-      X: 1,
-      O: 1,
-    }
-    this.trapRemaining = {
-      X: 1,
-      O: 1,
-    }
-    this.questionIndex = 0
-    this.matchComplete = false
+    this.matchSystem.resetMatchState()
+    this.abilitySystem.resetMatchState()
+    this.questionSystem.resetQuestionIndex()
     this.updateQuestionResult('النتيجة: بانتظار السؤال')
     this.resetStage()
   }
@@ -1119,162 +734,25 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  drawGrid(boardX, boardY, boardSize, cellSize) {
-    // A soft wide pass creates the glow; a thin pass keeps the grid readable.
-    this.gridGraphics.clear()
-    this.drawGridLines(boardX, boardY, boardSize, cellSize, 14, 0xff003c, 0.22)
-    this.drawGridLines(boardX, boardY, boardSize, cellSize, 4, 0xff3355, 1)
-  }
-
-  drawGridLines(boardX, boardY, boardSize, cellSize, width, color, alpha) {
-    this.gridGraphics.lineStyle(width, color, alpha)
-
-    for (let line = 1; line < 3; line += 1) {
-      const offset = line * cellSize
-
-      this.gridGraphics.lineBetween(boardX + offset, boardY, boardX + offset, boardY + boardSize)
-      this.gridGraphics.lineBetween(boardX, boardY + offset, boardX + boardSize, boardY + offset)
-    }
-  }
-
-  positionCells(boardX, boardY, cellSize) {
-    this.cells.forEach((cell, index) => {
-      const column = index % 3
-      const row = Math.floor(index / 3)
-
-      cell.setPosition(boardX + column * cellSize, boardY + row * cellSize)
-      cell.setSize(cellSize, cellSize)
-      cell.input.hitArea.setTo(0, 0, cellSize, cellSize)
-    })
-  }
-
-  positionMarks(boardX, boardY, cellSize) {
-    this.marks.forEach((mark, index) => {
-      const column = index % 3
-      const row = Math.floor(index / 3)
-
-      mark.setPosition(boardX + column * cellSize + cellSize / 2, boardY + row * cellSize + cellSize / 2)
-      mark.setFontSize(Math.floor(cellSize * 0.48))
-    })
-  }
-
-  createPowerButton() {
-    const button = this.add.container(0, 0)
-    const background = this.add
-      .rectangle(0, 0, 190, 40, 0x1f2937, 1)
-      .setStrokeStyle(1, 0xff3355, 0.7)
-      .setInteractive({ useHandCursor: true })
-    const label = this.add
-      .text(0, 0, 'تفعيل القوة', {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '15px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    background.on('pointerdown', () => {
-      this.activatePower()
-    })
-
-    button.add([background, label])
-    button.background = background
-    button.label = label
-
-    return button
-  }
-
-  createShieldButton() {
-    const button = this.add.container(0, 0)
-    const background = this.add
-      .rectangle(0, 0, 190, 40, 0x10222d, 1)
-      .setStrokeStyle(1, 0x7dd3fc, 0.7)
-      .setInteractive({ useHandCursor: true })
-    const label = this.add
-      .text(0, 0, 'تفعيل الدرع', {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '15px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    background.on('pointerdown', () => {
-      this.activateShield()
-    })
-
-    button.add([background, label])
-    button.background = background
-    button.label = label
-
-    return button
-  }
-
-  createStealButton() {
-    const button = this.add.container(0, 0)
-    const background = this.add
-      .rectangle(0, 0, 190, 40, 0x123524, 1)
-      .setStrokeStyle(1, 0x34d399, 0.7)
-      .setInteractive({ useHandCursor: true })
-    const label = this.add
-      .text(0, 0, 'تفعيل السرقة', {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '15px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    background.on('pointerdown', () => {
-      this.activateSteal()
-    })
-
-    button.add([background, label])
-    button.background = background
-    button.label = label
-
-    return button
-  }
-
-  createTrapButton() {
-    const button = this.add.container(0, 0)
-    const background = this.add
-      .rectangle(0, 0, 190, 40, 0x3f2514, 1)
-      .setStrokeStyle(1, 0xfb923c, 0.7)
-      .setInteractive({ useHandCursor: true })
-    const label = this.add
-      .text(0, 0, 'تفعيل الفخ', {
-        color: '#ffffff',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '15px',
-        align: 'center',
-        rtl: true,
-      })
-      .setOrigin(0.5)
-
-    background.on('pointerdown', () => {
-      this.activateTrap()
-    })
-
-    button.add([background, label])
-    button.background = background
-    button.label = label
-
-    return button
-  }
-
   updateTurnLabel() {
-    this.turnLabel.setText(`دور الفريق ${this.currentPlayer}`)
+    this.teamPanelUI.updateTurnLabel(this.turnLabel, this.currentPlayer)
   }
 
   updateStageLabel() {
-    this.stageLabel.setText(`الجولة ${this.currentStage}/${this.maxStages}`)
-    this.teamXScoreLabel.setText(`الفريق X: ${this.stageScores.X}`)
-    this.teamOScoreLabel.setText(`الفريق O: ${this.stageScores.O}`)
-    this.powerCountsLabel.setText(`القوة X: ${this.powerRemaining.X}   القوة O: ${this.powerRemaining.O}`)
+    this.matchInfoUI.updateMatchInfo(
+      this.stageLabel,
+      this.teamXScoreLabel,
+      this.teamOScoreLabel,
+      this.currentStage,
+      this.maxStages,
+      this.stageScores,
+    )
+    this.abilityBarUI.updateCounts(this, {
+      power: this.powerRemaining,
+      shield: this.shieldRemaining,
+      steal: this.stealRemaining,
+      trap: this.trapRemaining,
+    })
   }
 
   updateAbilityUI() {
@@ -1286,148 +764,158 @@ export class GameScene extends Phaser.Scene {
 
   updatePowerUI() {
     const isArmed = this.powerArmedTeam === this.currentPlayer
-    const shieldArmed = this.shieldArmedTeam === this.currentPlayer
-    const stealArmed = this.stealArmedTeam === this.currentPlayer
-    const trapArmed = this.trapArmedTeam === this.currentPlayer
     const hasPower = this.powerRemaining[this.currentPlayer] > 0
-    const canActivate = !this.matchComplete && !this.stageLocked && !this.questionOpen && hasPower && !isArmed && !shieldArmed && !stealArmed && !trapArmed
+    const canActivate = this.abilitySystem.canActivatePower({
+      currentPlayer: this.currentPlayer,
+      matchComplete: this.matchComplete,
+      stageLocked: this.stageLocked,
+      questionOpen: this.questionOpen,
+    })
 
-    if (isArmed) {
-      this.powerStatusLabel.setText(`القوة: مفعلة للفريق ${this.currentPlayer}`)
-    } else if (hasPower) {
-      this.powerStatusLabel.setText(`القوة: متاحة للفريق ${this.currentPlayer}`)
-    } else {
-      this.powerStatusLabel.setText(`القوة: غير متاحة للفريق ${this.currentPlayer}`)
-    }
+    const statusText = isArmed
+      ? `القوة: مفعلة للفريق ${this.currentPlayer}`
+      : hasPower
+        ? `القوة: متاحة للفريق ${this.currentPlayer}`
+        : `القوة: غير متاحة للفريق ${this.currentPlayer}`
 
-    this.powerButton.label.setText(canActivate ? 'تفعيل القوة' : 'القوة غير متاحة')
-
-    if (canActivate) {
-      this.powerButton.background.setInteractive({ useHandCursor: true })
-      this.powerButton.background.setAlpha(1)
-      this.powerButton.label.setAlpha(1)
-    } else {
-      this.powerButton.background.disableInteractive()
-      this.powerButton.background.setAlpha(0.55)
-      this.powerButton.label.setAlpha(0.75)
-    }
+    this.abilityBarUI.updateAbilityState({
+      statusLabel: this.powerStatusLabel,
+      button: this.powerButton,
+      statusText,
+      buttonText: canActivate ? `تفعيل ${ABILITY_NAMES.power}` : `${ABILITY_NAMES.power} غير متاح`,
+      canActivate,
+      strokeColor: 0xff3355,
+    })
   }
 
   updateShieldCountsLabel() {
-    this.shieldCountsLabel.setText(`الدرع X: ${this.shieldRemaining.X}   الدرع O: ${this.shieldRemaining.O}`)
+    this.abilityBarUI.updateCounts(this, {
+      power: this.powerRemaining,
+      shield: this.shieldRemaining,
+      steal: this.stealRemaining,
+      trap: this.trapRemaining,
+    })
   }
 
   updateShieldUI() {
     const isArmed = this.shieldArmedTeam === this.currentPlayer
-    const powerArmed = this.powerArmedTeam === this.currentPlayer
-    const stealArmed = this.stealArmedTeam === this.currentPlayer
-    const trapArmed = this.trapArmedTeam === this.currentPlayer
     const hasShield = this.shieldRemaining[this.currentPlayer] > 0
-    const hasTarget = this.hasValidShieldTarget()
-    const canActivate = !this.matchComplete && !this.stageLocked && !this.questionOpen && hasShield && hasTarget && !isArmed && !powerArmed && !stealArmed && !trapArmed
+    const hasTarget = this.abilitySystem.hasValidShieldTarget(this.board, this.currentPlayer)
+    const canActivate = this.abilitySystem.canActivateShield({
+      board: this.board,
+      currentPlayer: this.currentPlayer,
+      matchComplete: this.matchComplete,
+      stageLocked: this.stageLocked,
+      questionOpen: this.questionOpen,
+    })
 
-    if (isArmed) {
-      this.shieldStatusLabel.setText(`الدرع: مفعّل للفريق ${this.currentPlayer}`)
-    } else if (hasShield && !hasTarget) {
-      this.shieldStatusLabel.setText('الدرع: لا توجد خانة مملوكة غير محمية')
-    } else if (hasShield) {
-      this.shieldStatusLabel.setText(`الدرع: متاح للفريق ${this.currentPlayer}`)
-    } else {
-      this.shieldStatusLabel.setText(`الدرع: مستخدم للفريق ${this.currentPlayer}`)
-    }
+    const statusText = isArmed
+      ? `الدرع: مفعّل للفريق ${this.currentPlayer}`
+      : hasShield && !hasTarget
+        ? 'الدرع: لا توجد خانة مملوكة غير محمية'
+        : hasShield
+          ? `الدرع: متاح للفريق ${this.currentPlayer}`
+          : `الدرع: مستخدم للفريق ${this.currentPlayer}`
 
-    this.shieldButton.label.setText(canActivate ? 'تفعيل الدرع' : 'الدرع غير متاح')
-
-    if (canActivate) {
-      this.shieldButton.background.setInteractive({ useHandCursor: true })
-      this.shieldButton.background.setAlpha(1)
-      this.shieldButton.label.setAlpha(1)
-    } else {
-      this.shieldButton.background.disableInteractive()
-      this.shieldButton.background.setAlpha(0.55)
-      this.shieldButton.label.setAlpha(0.75)
-    }
+    this.abilityBarUI.updateAbilityState({
+      statusLabel: this.shieldStatusLabel,
+      button: this.shieldButton,
+      statusText,
+      buttonText: canActivate ? `تفعيل ${ABILITY_NAMES.shield}` : `${ABILITY_NAMES.shield} غير متاح`,
+      canActivate,
+      strokeColor: 0x7dd3fc,
+    })
   }
 
   updateStealCountsLabel() {
-    this.stealCountsLabel.setText(`السرقة X: ${this.stealRemaining.X}   السرقة O: ${this.stealRemaining.O}`)
+    this.abilityBarUI.updateCounts(this, {
+      power: this.powerRemaining,
+      shield: this.shieldRemaining,
+      steal: this.stealRemaining,
+      trap: this.trapRemaining,
+    })
   }
 
   updateStealUI() {
     const isArmed = this.stealArmedTeam === this.currentPlayer
-    const powerArmed = this.powerArmedTeam === this.currentPlayer
-    const shieldArmed = this.shieldArmedTeam === this.currentPlayer
-    const trapArmed = this.trapArmedTeam === this.currentPlayer
     const hasSteal = this.stealRemaining[this.currentPlayer] > 0
-    const hasTarget = this.hasValidStealTarget()
-    const canActivate = !this.matchComplete && !this.stageLocked && !this.questionOpen && hasSteal && hasTarget && !isArmed && !powerArmed && !shieldArmed && !trapArmed
+    const hasTarget = this.abilitySystem.hasValidStealTarget(this.board, this.currentPlayer)
+    const canActivate = this.abilitySystem.canActivateSteal({
+      board: this.board,
+      currentPlayer: this.currentPlayer,
+      matchComplete: this.matchComplete,
+      stageLocked: this.stageLocked,
+      questionOpen: this.questionOpen,
+    })
 
-    if (isArmed) {
-      this.stealStatusLabel.setText(`السرقة: مفعّلة للفريق ${this.currentPlayer}`)
-    } else if (hasSteal && !hasTarget) {
-      this.stealStatusLabel.setText('السرقة: لا توجد خانة خصم غير محمية')
-    } else if (hasSteal) {
-      this.stealStatusLabel.setText(`السرقة: متاحة للفريق ${this.currentPlayer}`)
-    } else {
-      this.stealStatusLabel.setText(`السرقة: مستخدمة للفريق ${this.currentPlayer}`)
-    }
+    const statusText = isArmed
+      ? `السرقة: مفعّلة للفريق ${this.currentPlayer}`
+      : hasSteal && !hasTarget
+        ? 'السرقة: لا توجد خانة خصم غير محمية'
+        : hasSteal
+          ? `السرقة: متاحة للفريق ${this.currentPlayer}`
+          : `السرقة: مستخدمة للفريق ${this.currentPlayer}`
 
-    this.stealButton.label.setText(canActivate ? 'تفعيل السرقة' : 'السرقة غير متاحة')
-
-    if (canActivate) {
-      this.stealButton.background.setInteractive({ useHandCursor: true })
-      this.stealButton.background.setAlpha(1)
-      this.stealButton.label.setAlpha(1)
-    } else {
-      this.stealButton.background.disableInteractive()
-      this.stealButton.background.setAlpha(0.55)
-      this.stealButton.label.setAlpha(0.75)
-    }
+    this.abilityBarUI.updateAbilityState({
+      statusLabel: this.stealStatusLabel,
+      button: this.stealButton,
+      statusText,
+      buttonText: canActivate ? `تفعيل ${ABILITY_NAMES.steal}` : `${ABILITY_NAMES.steal} غير متاح`,
+      canActivate,
+      strokeColor: 0x34d399,
+    })
   }
 
   updateTrapCountsLabel() {
-    this.trapCountsLabel.setText(`الفخ X: ${this.trapRemaining.X}   الفخ O: ${this.trapRemaining.O}`)
+    this.abilityBarUI.updateCounts(this, {
+      power: this.powerRemaining,
+      shield: this.shieldRemaining,
+      steal: this.stealRemaining,
+      trap: this.trapRemaining,
+    })
   }
 
   updateTrapUI() {
     const isArmed = this.trapArmedTeam === this.currentPlayer
-    const powerArmed = this.powerArmedTeam === this.currentPlayer
-    const shieldArmed = this.shieldArmedTeam === this.currentPlayer
-    const stealArmed = this.stealArmedTeam === this.currentPlayer
     const hasTrap = this.trapRemaining[this.currentPlayer] > 0
-    const hasTarget = this.hasValidTrapTarget()
-    const canActivate = !this.matchComplete && !this.stageLocked && !this.questionOpen && hasTrap && hasTarget && !isArmed && !powerArmed && !shieldArmed && !stealArmed
+    const hasTarget = this.abilitySystem.hasValidTrapTarget(this.board)
+    const canActivate = this.abilitySystem.canActivateTrap({
+      board: this.board,
+      currentPlayer: this.currentPlayer,
+      matchComplete: this.matchComplete,
+      stageLocked: this.stageLocked,
+      questionOpen: this.questionOpen,
+    })
 
-    if (isArmed) {
-      this.trapStatusLabel.setText(`الفخ: مفعّل للفريق ${this.currentPlayer}`)
-    } else if (hasTrap && !hasTarget) {
-      this.trapStatusLabel.setText('الفخ: لا توجد خانة فارغة بلا فخ')
-    } else if (hasTrap) {
-      this.trapStatusLabel.setText(`الفخ: متاح للفريق ${this.currentPlayer}`)
-    } else {
-      this.trapStatusLabel.setText(`الفخ: مستخدم للفريق ${this.currentPlayer}`)
-    }
+    const statusText = isArmed
+      ? `الفخ: مفعّل للفريق ${this.currentPlayer}`
+      : hasTrap && !hasTarget
+        ? 'الفخ: لا توجد خانة فارغة بلا فخ'
+        : hasTrap
+          ? `الفخ: متاح للفريق ${this.currentPlayer}`
+          : `الفخ: مستخدم للفريق ${this.currentPlayer}`
 
-    this.trapButton.label.setText(canActivate ? 'تفعيل الفخ' : 'الفخ غير متاح')
-
-    if (canActivate) {
-      this.trapButton.background.setInteractive({ useHandCursor: true })
-      this.trapButton.background.setAlpha(1)
-      this.trapButton.label.setAlpha(1)
-    } else {
-      this.trapButton.background.disableInteractive()
-      this.trapButton.background.setAlpha(0.55)
-      this.trapButton.label.setAlpha(0.75)
-    }
+    this.abilityBarUI.updateAbilityState({
+      statusLabel: this.trapStatusLabel,
+      button: this.trapButton,
+      statusText,
+      buttonText: canActivate ? `تفعيل ${ABILITY_NAMES.trap}` : `${ABILITY_NAMES.trap} غير متاح`,
+      canActivate,
+      strokeColor: 0xfb923c,
+    })
   }
 
   activatePower() {
-    if (this.matchComplete || this.stageLocked || this.questionOpen || this.powerRemaining[this.currentPlayer] <= 0 || this.powerArmedTeam === this.currentPlayer || this.shieldArmedTeam === this.currentPlayer || this.stealArmedTeam === this.currentPlayer || this.trapArmedTeam === this.currentPlayer) {
+    if (!this.abilitySystem.canActivatePower({
+      currentPlayer: this.currentPlayer,
+      matchComplete: this.matchComplete,
+      stageLocked: this.stageLocked,
+      questionOpen: this.questionOpen,
+    })) {
       return
     }
 
-    this.powerRemaining[this.currentPlayer] = 0
-    this.powerArmedTeam = this.currentPlayer
+    this.abilitySystem.activatePower(this.currentPlayer)
     this.updateStageLabel()
     this.updatePowerUI()
     this.updateShieldUI()
@@ -1436,17 +924,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   activateShield() {
-    if (this.matchComplete || this.stageLocked || this.questionOpen || this.shieldRemaining[this.currentPlayer] <= 0 || this.shieldArmedTeam === this.currentPlayer || this.powerArmedTeam === this.currentPlayer || this.stealArmedTeam === this.currentPlayer || this.trapArmedTeam === this.currentPlayer) {
+    if (!this.abilitySystem.canActivateShield({
+      board: this.board,
+      currentPlayer: this.currentPlayer,
+      matchComplete: this.matchComplete,
+      stageLocked: this.stageLocked,
+      questionOpen: this.questionOpen,
+    })) {
       return
     }
 
-    if (!this.hasValidShieldTarget()) {
+    if (!this.abilitySystem.hasValidShieldTarget(this.board, this.currentPlayer)) {
       this.shieldStatusLabel.setText('الدرع: لا توجد خانة مملوكة غير محمية')
       this.updateShieldUI()
       return
     }
 
-    this.shieldArmedTeam = this.currentPlayer
+    this.abilitySystem.activateShield(this.currentPlayer)
     this.updateShieldUI()
     this.updatePowerUI()
     this.updateStealUI()
@@ -1454,17 +948,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   activateSteal() {
-    if (this.matchComplete || this.stageLocked || this.questionOpen || this.stealRemaining[this.currentPlayer] <= 0 || this.stealArmedTeam === this.currentPlayer || this.powerArmedTeam === this.currentPlayer || this.shieldArmedTeam === this.currentPlayer || this.trapArmedTeam === this.currentPlayer) {
+    if (!this.abilitySystem.canActivateSteal({
+      board: this.board,
+      currentPlayer: this.currentPlayer,
+      matchComplete: this.matchComplete,
+      stageLocked: this.stageLocked,
+      questionOpen: this.questionOpen,
+    })) {
       return
     }
 
-    if (!this.hasValidStealTarget()) {
+    if (!this.abilitySystem.hasValidStealTarget(this.board, this.currentPlayer)) {
       this.stealStatusLabel.setText('السرقة: لا توجد خانة خصم غير محمية')
       this.updateStealUI()
       return
     }
 
-    this.stealArmedTeam = this.currentPlayer
+    this.abilitySystem.activateSteal(this.currentPlayer)
     this.updateStealUI()
     this.updatePowerUI()
     this.updateShieldUI()
@@ -1472,17 +972,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   activateTrap() {
-    if (this.matchComplete || this.stageLocked || this.questionOpen || this.trapRemaining[this.currentPlayer] <= 0 || this.trapArmedTeam === this.currentPlayer || this.powerArmedTeam === this.currentPlayer || this.shieldArmedTeam === this.currentPlayer || this.stealArmedTeam === this.currentPlayer) {
+    if (!this.abilitySystem.canActivateTrap({
+      board: this.board,
+      currentPlayer: this.currentPlayer,
+      matchComplete: this.matchComplete,
+      stageLocked: this.stageLocked,
+      questionOpen: this.questionOpen,
+    })) {
       return
     }
 
-    if (!this.hasValidTrapTarget()) {
+    if (!this.abilitySystem.hasValidTrapTarget(this.board)) {
       this.trapStatusLabel.setText('الفخ: لا توجد خانة فارغة بلا فخ')
       this.updateTrapUI()
       return
     }
 
-    this.trapArmedTeam = this.currentPlayer
+    this.abilitySystem.activateTrap(this.currentPlayer)
     this.updateTrapUI()
     this.updatePowerUI()
     this.updateShieldUI()
@@ -1491,10 +997,7 @@ export class GameScene extends Phaser.Scene {
 
   switchTurn() {
     this.currentPlayer = this.currentPlayer === 'X' ? 'O' : 'X'
-    this.powerArmedTeam = null
-    this.shieldArmedTeam = null
-    this.stealArmedTeam = null
-    this.trapArmedTeam = null
+    this.abilitySystem.clearArmedAbilities()
     this.updateTurnLabel()
     this.updatePowerUI()
     this.updateShieldUI()
@@ -1502,223 +1005,62 @@ export class GameScene extends Phaser.Scene {
     this.updateTrapUI()
   }
 
-  claimPendingCell() {
-    if (this.resolveTrapForPendingCell()) {
+  applyTurnResult(result) {
+    if (!result) {
       return
     }
 
-    this.claimCellAtIndex(this.pendingCellIndex)
-  }
-
-  claimCellAtIndex(index) {
-    const row = Math.floor(index / 3)
-    const column = index % 3
-
-    this.board[row][column] = this.currentPlayer
-    this.createMark(index, this.currentPlayer)
-    this.pendingCellIndex = null
-    this.powerArmedTeam = null
-    this.shieldArmedTeam = null
-    this.stealArmedTeam = null
-    this.trapArmedTeam = null
-    this.trapSquares.delete(index)
-    this.updatePowerUI()
-    this.updateShieldUI()
-    this.updateStealUI()
-    this.updateTrapUI()
-    this.layoutBoard()
-
-    if (this.getStageWinner(this.currentPlayer)) {
-      this.declareStageWinner(this.currentPlayer)
-      return
+    switch (result.type) {
+      case 'OPEN_QUESTION':
+        this.pendingCellIndex = result.cellIndex
+        this.showQuestionModal(this.questionSystem.getNextQuestion())
+        return
+      case 'CLAIM_CELL':
+      case 'POWER_CLAIM':
+      case 'TRAP_TRIGGER':
+      case 'STEAL_APPLIED':
+        this.pendingCellIndex = null
+        this.createMark(result.cellIndex, result.team)
+        this.refreshResolvedMoveUI({ shouldLayoutBoard: true })
+        this.applyTurnResult(result.followUp)
+        return
+      case 'SHIELD_APPLIED':
+        this.createProtectedMarker(result.cellIndex)
+        this.refreshResolvedMoveUI({ shouldLayoutBoard: true })
+        this.applyTurnResult(result.followUp)
+        return
+      case 'TRAP_PLACED':
+        this.refreshResolvedMoveUI()
+        this.applyTurnResult(result.followUp)
+        return
+      case 'SWITCH_TURN':
+        this.switchTurn()
+        return
+      case 'STAGE_WIN':
+        this.declareStageWinner(result.team)
+        return
+      case 'STAGE_DRAW':
+        this.declareStageDraw()
+        return
+      case 'INVALID_TARGET':
+        return
+      default:
+        return
     }
+  }
 
-    if (this.isBoardFull() && !this.hasAnyStageWinner()) {
-      this.declareStageDraw()
-      return
+  refreshResolvedMoveUI({ shouldLayoutBoard = false } = {}) {
+    this.abilityBarUI.updateCounts(this, {
+      power: this.powerRemaining,
+      shield: this.shieldRemaining,
+      steal: this.stealRemaining,
+      trap: this.trapRemaining,
+    })
+    this.updateAbilityUI()
+
+    if (shouldLayoutBoard) {
+      this.layoutBoard()
     }
-
-    this.switchTurn()
-  }
-
-  resolveTrapForPendingCell() {
-    const index = this.pendingCellIndex
-    const trapOwner = this.trapSquares.get(index)
-
-    if (!trapOwner) {
-      return false
-    }
-
-    if (trapOwner === this.currentPlayer || !this.canFutureAbilityModifySquare(index)) {
-      this.trapSquares.delete(index)
-      return false
-    }
-
-    const row = Math.floor(index / 3)
-    const column = index % 3
-
-    this.board[row][column] = trapOwner
-    this.createMark(index, trapOwner)
-    this.trapSquares.delete(index)
-    this.pendingCellIndex = null
-    this.powerArmedTeam = null
-    this.shieldArmedTeam = null
-    this.stealArmedTeam = null
-    this.trapArmedTeam = null
-    this.updatePowerUI()
-    this.updateShieldUI()
-    this.updateStealUI()
-    this.updateTrapUI()
-    this.layoutBoard()
-
-    if (this.getStageWinner(trapOwner)) {
-      this.declareStageWinner(trapOwner)
-      return true
-    }
-
-    if (this.isBoardFull() && !this.hasAnyStageWinner()) {
-      this.declareStageDraw()
-      return true
-    }
-
-    this.switchTurn()
-
-    return true
-  }
-
-  applyStealToCell(index) {
-    if (!this.isSquareOwnedByOpponent(index) || !this.canFutureAbilityModifySquare(index)) {
-      return
-    }
-
-    const row = Math.floor(index / 3)
-    const column = index % 3
-
-    this.board[row][column] = this.currentPlayer
-    this.createMark(index, this.currentPlayer)
-    this.stealRemaining[this.currentPlayer] = 0
-    this.powerArmedTeam = null
-    this.shieldArmedTeam = null
-    this.stealArmedTeam = null
-    this.trapArmedTeam = null
-    this.trapSquares.delete(index)
-    this.updateStealCountsLabel()
-    this.updatePowerUI()
-    this.updateShieldUI()
-    this.updateStealUI()
-    this.updateTrapUI()
-    this.layoutBoard()
-
-    if (this.getStageWinner(this.currentPlayer)) {
-      this.declareStageWinner(this.currentPlayer)
-      return
-    }
-
-    if (this.isBoardFull() && !this.hasAnyStageWinner()) {
-      this.declareStageDraw()
-      return
-    }
-
-    this.switchTurn()
-  }
-
-  applyTrapToCell(index) {
-    if (!this.isSquareEmpty(index) || this.trapSquares.has(index)) {
-      return
-    }
-
-    this.trapSquares.set(index, this.currentPlayer)
-    this.trapRemaining[this.currentPlayer] = 0
-    this.powerArmedTeam = null
-    this.shieldArmedTeam = null
-    this.stealArmedTeam = null
-    this.trapArmedTeam = null
-    this.updateTrapCountsLabel()
-    this.updatePowerUI()
-    this.updateShieldUI()
-    this.updateStealUI()
-    this.updateTrapUI()
-    this.switchTurn()
-  }
-
-  applyShieldToCell(index) {
-    if (!this.isSquareOwnedByCurrentTeam(index) || this.isSquareProtected(index)) {
-      return
-    }
-
-    this.shieldRemaining[this.currentPlayer] = 0
-    this.protectedSquares.add(index)
-    this.createProtectedMarker(index)
-    this.powerArmedTeam = null
-    this.shieldArmedTeam = null
-    this.stealArmedTeam = null
-    this.trapArmedTeam = null
-    this.updateShieldCountsLabel()
-    this.updateShieldUI()
-    this.updatePowerUI()
-    this.updateStealUI()
-    this.updateTrapUI()
-    this.switchTurn()
-  }
-
-  isSquareEmpty(index) {
-    const row = Math.floor(index / 3)
-    const column = index % 3
-
-    return this.board[row][column] === null
-  }
-
-  hasValidShieldTarget() {
-    return this.board.some((row, rowIndex) =>
-      row.some((cell, columnIndex) => {
-        const index = rowIndex * 3 + columnIndex
-
-        return cell === this.currentPlayer && !this.isSquareProtected(index)
-      }),
-    )
-  }
-
-  hasValidStealTarget() {
-    return this.board.some((row, rowIndex) =>
-      row.some((cell, columnIndex) => {
-        const index = rowIndex * 3 + columnIndex
-
-        return cell !== null && cell !== this.currentPlayer && this.canFutureAbilityModifySquare(index)
-      }),
-    )
-  }
-
-  hasValidTrapTarget() {
-    return this.board.some((row, rowIndex) =>
-      row.some((cell, columnIndex) => {
-        const index = rowIndex * 3 + columnIndex
-
-        return cell === null && !this.trapSquares.has(index)
-      }),
-    )
-  }
-
-  isSquareOwnedByCurrentTeam(index) {
-    const row = Math.floor(index / 3)
-    const column = index % 3
-
-    return this.board[row][column] === this.currentPlayer
-  }
-
-  isSquareOwnedByOpponent(index) {
-    const row = Math.floor(index / 3)
-    const column = index % 3
-    const owner = this.board[row][column]
-
-    return owner !== null && owner !== this.currentPlayer
-  }
-
-  isSquareProtected(index) {
-    return this.protectedSquares.has(index)
-  }
-
-  canFutureAbilityModifySquare(index) {
-    return !this.isSquareProtected(index)
   }
 
   createProtectedMarker(index) {
@@ -1731,19 +1073,6 @@ export class GameScene extends Phaser.Scene {
     this.protectedMarkers[index] = marker
   }
 
-  positionProtectedMarkers(boardX, boardY, cellSize) {
-    this.protectedMarkers.forEach((marker, index) => {
-      if (!marker || !this.protectedSquares.has(index)) {
-        return
-      }
-
-      const column = index % 3
-      const row = Math.floor(index / 3)
-      marker.setPosition(boardX + column * cellSize + 16, boardY + row * cellSize + 16)
-      marker.setRadius(Math.max(8, cellSize * 0.08))
-    })
-  }
-
   resetStage() {
     this.board = this.createEmptyBoard()
     this.marks.forEach((mark) => mark.destroy())
@@ -1754,16 +1083,11 @@ export class GameScene extends Phaser.Scene {
       }
     })
     this.protectedMarkers = []
-    this.protectedSquares.clear()
-    this.trapSquares.clear()
+    this.abilitySystem.resetStageState()
     this.pendingCellIndex = null
-    this.teamAnswers = this.createTeamAnswerState()
-    this.stageLocked = false
+    this.questionSystem.resetTeamAnswers()
+    this.matchSystem.resetStageState()
     this.currentPlayer = 'X'
-    this.powerArmedTeam = null
-    this.shieldArmedTeam = null
-    this.stealArmedTeam = null
-    this.trapArmedTeam = null
 
     this.updateStageLabel()
     this.updateShieldCountsLabel()
@@ -1796,13 +1120,13 @@ export class GameScene extends Phaser.Scene {
     const centerPanelX = leftPanelX + leftPanelWidth + gap
     const centerPanelWidth = rightPanelX - gap - centerPanelX
     const centerPanelHeight = sidePanelHeight
-    const boardSize = Math.min(centerPanelWidth * 0.72, centerPanelHeight * 0.76, 560)
-    const cellSize = boardSize / 3
-    const boardX = centerPanelX + (centerPanelWidth - boardSize) / 2
-    const boardY = panelTop + (centerPanelHeight - boardSize) / 2
+    const { boardSize, cellSize, boardX, boardY } = this.boardUI.getLayout({
+      centerPanelX,
+      panelTop,
+      centerPanelWidth,
+      centerPanelHeight,
+    })
     const bottomPanelWidth = width - margin * 2
-    const bottomButtonGap = Math.min(240, Math.max(204, (bottomPanelWidth - 120) / 4))
-    const bottomButtonStartX = bottomPanelWidth / 2 - bottomButtonGap * 1.5
 
     this.drawBackground(width, height)
     this.drawPanel(this.topBarPanel, topBarX, topBarY, topBarWidth, topBarHeight)
@@ -1810,60 +1134,48 @@ export class GameScene extends Phaser.Scene {
     this.drawPanel(this.centerPanel, centerPanelX, panelTop, centerPanelWidth, centerPanelHeight)
     this.drawPanel(this.rightPanel, rightPanelX, panelTop, rightPanelWidth, sidePanelHeight, 'left')
     this.drawPanel(this.bottomPanel, margin, bottomPanelY, bottomPanelWidth, bottomBarHeight)
+    this.matchInfoUI.layout({
+      topBarWidth,
+      currentPlayer: this.currentPlayer,
+      stageCardGraphics: this.stageCardGraphics,
+      teamXCardGraphics: this.teamXCardGraphics,
+      teamOCardGraphics: this.teamOCardGraphics,
+      title: this.title,
+      stageLabel: this.stageLabel,
+      teamXScoreLabel: this.teamXScoreLabel,
+      teamOScoreLabel: this.teamOScoreLabel,
+    })
+    this.teamPanelUI.layout({
+      leftPanelWidth,
+      currentPlayer: this.currentPlayer,
+      currentTeamCardGraphics: this.currentTeamCardGraphics,
+      resourceCardGraphics: this.resourceCardGraphics,
+      statusCardGraphics: this.statusCardGraphics,
+      currentTeamHeading: this.currentTeamHeading,
+      resourcesHeading: this.resourcesHeading,
+      abilityStatusHeading: this.abilityStatusHeading,
+      turnLabel: this.turnLabel,
+    })
+    this.questionPanelUI.layoutSidebar(rightPanelWidth, sidePanelHeight)
+    this.abilityBarUI.layoutSidebar(leftPanelWidth)
 
-    this.title.setFontSize(24)
-    this.title.setPosition(topBarWidth / 2, 23)
-    this.stageLabel.setPosition(topBarWidth / 2, 53)
-    this.teamXScoreLabel.setPosition(24, 42)
-    this.teamOScoreLabel.setPosition(topBarWidth - 24, 42)
-
-    this.currentTeamHeading.setPosition(leftPanelWidth / 2, 34)
-    this.turnLabel.setFontSize(22)
-    this.turnLabel.setPosition(leftPanelWidth / 2, 72)
-    this.resourcesHeading.setPosition(leftPanelWidth / 2, 126)
-    this.powerCountsLabel.setPosition(leftPanelWidth / 2, 164)
-    this.shieldCountsLabel.setPosition(leftPanelWidth / 2, 194)
-    this.stealCountsLabel.setPosition(leftPanelWidth / 2, 224)
-    this.trapCountsLabel.setPosition(leftPanelWidth / 2, 254)
-    this.abilityStatusHeading.setPosition(leftPanelWidth / 2, 318)
-    this.powerStatusLabel.setPosition(leftPanelWidth / 2, 356)
-    this.shieldStatusLabel.setPosition(leftPanelWidth / 2, 388)
-    this.stealStatusLabel.setPosition(leftPanelWidth / 2, 420)
-    this.trapStatusLabel.setPosition(leftPanelWidth / 2, 452)
-
-    const leftTextWidth = leftPanelWidth - 36
-    this.setTextWrap(this.turnLabel, leftTextWidth)
-    this.setTextWrap(this.powerCountsLabel, leftTextWidth)
-    this.setTextWrap(this.shieldCountsLabel, leftTextWidth)
-    this.setTextWrap(this.stealCountsLabel, leftTextWidth)
-    this.setTextWrap(this.trapCountsLabel, leftTextWidth)
-    this.setTextWrap(this.powerStatusLabel, leftTextWidth)
-    this.setTextWrap(this.shieldStatusLabel, leftTextWidth)
-    this.setTextWrap(this.stealStatusLabel, leftTextWidth)
-    this.setTextWrap(this.trapStatusLabel, leftTextWidth)
-
-    this.questionAreaHeading.setPosition(rightPanelWidth / 2, 34)
-    this.questionTimerIdleText.setPosition(rightPanelWidth / 2, 82)
-    this.questionIdleText.setPosition(rightPanelWidth / 2, 150)
-    this.questionResultHeading.setPosition(rightPanelWidth / 2, sidePanelHeight - 74)
-    this.questionResultLabel.setPosition(rightPanelWidth / 2, sidePanelHeight - 42)
-    this.setTextWrap(this.questionIdleText, rightPanelWidth - 44)
-    this.setTextWrap(this.questionResultLabel, rightPanelWidth - 44)
-
-    this.powerButton.setPosition(bottomButtonStartX, bottomBarHeight / 2)
-    this.shieldButton.setPosition(bottomButtonStartX + bottomButtonGap, bottomBarHeight / 2)
-    this.stealButton.setPosition(bottomButtonStartX + bottomButtonGap * 2, bottomBarHeight / 2)
-    this.trapButton.setPosition(bottomButtonStartX + bottomButtonGap * 3, bottomBarHeight / 2)
+    this.abilityBarUI.layoutBottomBar(bottomPanelWidth, bottomBarHeight)
 
     if (this.questionOpen && this.activeQuestion) {
       this.setQuestionIdleVisible(false)
       this.renderQuestionPanel(this.activeQuestion)
     }
 
-    this.drawGrid(boardX, boardY, boardSize, cellSize)
-    this.positionCells(boardX, boardY, cellSize)
-    this.positionMarks(boardX, boardY, cellSize)
-    this.positionProtectedMarkers(boardX, boardY, cellSize)
+    this.boardUI.layout({
+      boardX,
+      boardY,
+      boardSize,
+      cellSize,
+      cells: this.cells,
+      marks: this.marks,
+      protectedMarkers: this.protectedMarkers,
+      protectedSquares: this.protectedSquares,
+    })
     this.layoutMatchEndOverlay(width, height)
   }
 }
