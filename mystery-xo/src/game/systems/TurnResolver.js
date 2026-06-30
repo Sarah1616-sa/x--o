@@ -5,40 +5,58 @@ export class TurnResolver {
     this.winningLines = winningLines
   }
 
-  handleCellClick({ index, board, currentPlayer, matchComplete, stageLocked, questionOpen }) {
-    if (matchComplete || stageLocked || questionOpen) {
-      return null
-    }
+ handleCellClick({
+  index,
+  board,
+  currentPlayer,
+  playerTeam,
+  matchComplete,
+  stageLocked,
+  questionOpen,
+}) {
+  if (matchComplete || stageLocked || questionOpen) {
+    return null
+  }
 
-    if (this.abilitySystem.stealArmedTeam === currentPlayer) {
-      return this.resolveSteal({ index, board, currentPlayer })
-    }
-
-    if (this.abilitySystem.shieldArmedTeam === currentPlayer) {
-      return this.resolveShield({ index, board, currentPlayer })
-    }
-
-    if (this.abilitySystem.trapArmedTeam === currentPlayer) {
-      return this.resolveTrapPlacement({ index, board })
-    }
-
-    if (!this.isSquareEmpty(board, index)) {
-      return null
-    }
-
-    if (this.abilitySystem.powerArmedTeam === currentPlayer) {
-      return {
-        type: 'POWER_CLAIM',
-        cellIndex: index,
-        team: currentPlayer,
-      }
-    }
-
+  // Multiplayer protection:
+  // This device can only act when its assigned team matches the active turn.
+  if (playerTeam && playerTeam !== currentPlayer) {
     return {
-      type: 'OPEN_QUESTION',
-      cellIndex: index,
+      type: 'NOT_YOUR_TURN',
+      currentTurnTeam: currentPlayer,
+      playerTeam,
     }
   }
+
+  if (this.abilitySystem.stealArmedTeam === currentPlayer) {
+    return this.resolveSteal({ index, board, currentPlayer })
+  }
+
+  if (this.abilitySystem.shieldArmedTeam === currentPlayer) {
+    return this.resolveShield({ index, board, currentPlayer })
+  }
+
+  if (this.abilitySystem.trapArmedTeam === currentPlayer) {
+    return this.resolveTrapPlacement({ index, board })
+  }
+
+  if (!this.isSquareEmpty(board, index)) {
+    return null
+  }
+
+  if (this.abilitySystem.powerArmedTeam === currentPlayer) {
+    return {
+      type: 'POWER_CLAIM',
+      cellIndex: index,
+      team: currentPlayer,
+    }
+  }
+
+  return {
+    type: 'OPEN_QUESTION',
+    cellIndex: index,
+  }
+}
 
   resolvePendingCell({ board, pendingCellIndex, currentPlayer }) {
     if (pendingCellIndex === null) {

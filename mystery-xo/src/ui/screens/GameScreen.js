@@ -100,71 +100,26 @@ export function GameScreen(nav, { room } = {}) {
 
   /* -------------------- cell click / turn resolution -------------------- */
   function handleCellClick(index) {
-    if (isMultiplayerMode) {
-      try { socketService.selectCell(index) } catch (e) { console.error(e) }
-      return
+  if (isMultiplayerMode) {
+    try {
+      socketService.selectCell(index)
+    } catch (e) {
+      console.error(e)
     }
-    applyTurnResult(turnResolver.handleCellClick({
-      index,
-      board,
-      currentPlayer,
-      matchComplete: matchSystem.matchComplete,
-      stageLocked: matchSystem.stageLocked,
-      questionOpen: questionSystem.questionOpen,
-    }))
+
+    return
   }
 
-  function applyTurnResult(result) {
-    if (!result) return
-    switch (result.type) {
-      case 'OPEN_QUESTION':
-        pendingCellIndex = result.cellIndex
-        openQuestion(questionSystem.getNextQuestion())
-        return
-      case 'CLAIM_CELL':
-      case 'POWER_CLAIM':
-        setCell(result.cellIndex, result.team)
-        pendingCellIndex = null
-        abilitySystem.consumeClaimAt(result.cellIndex)
-        render()
-        applyBoardOutcome(result.team)
-        return
-      case 'TRAP_TRIGGER':
-        setCell(result.cellIndex, result.team)
-        pendingCellIndex = null
-        abilitySystem.resolveTrapForPendingCell(result.cellIndex, currentPlayer)
-        render()
-        applyBoardOutcome(result.team)
-        return
-      case 'APPLY_STEAL':
-        setCell(result.cellIndex, result.team)
-        abilitySystem.consumeSteal(currentPlayer, result.cellIndex)
-        render()
-        applyBoardOutcome(result.team)
-        return
-      case 'APPLY_SHIELD':
-        abilitySystem.consumeShield(currentPlayer, result.cellIndex)
-        render()
-        applyTurnResult(turnResolver.createSwitchTurnResult('SHIELD_APPLIED'))
-        return
-      case 'PLACE_TRAP':
-        abilitySystem.consumeTrapPlacement(currentPlayer, result.cellIndex)
-        render()
-        applyTurnResult(turnResolver.createSwitchTurnResult('TRAP_PLACED'))
-        return
-      case 'SWITCH_TURN':
-        switchTurn()
-        return
-      case 'STAGE_WIN':
-        declareStageWinner(result.team)
-        return
-      case 'STAGE_DRAW':
-        declareStageDraw()
-        return
-      default:
-        return
-    }
-  }
+  applyTurnResult(turnResolver.handleCellClick({
+    index,
+    board,
+    currentPlayer,
+    matchComplete: matchSystem.matchComplete,
+    stageLocked: matchSystem.stageLocked,
+    questionOpen: questionSystem.questionOpen,
+  }))
+}
+
 
   function applyBoardOutcome(team) {
     applyTurnResult(turnResolver.resolveBoardOutcome(board, team))

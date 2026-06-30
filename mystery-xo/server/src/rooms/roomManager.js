@@ -246,28 +246,29 @@ export class RoomManager {
     return { canStart: true, reason: 'Match can start.' }
   }
 
-  startMatch(socketId) {
-    
-    const { room, player } = this.getPlayerContextOrThrow(socketId)
+ startMatch(socketId) {
+  const { room, player } = this.getPlayerContextOrThrow(socketId)
 
-    if (room.hostPlayerId !== player.playerId) {
-      throw new Error('Only the host can start the match.')
-    }
-
-    if (room.phase !== ROOM_PHASES.LOBBY) {
-      throw new Error('Match has already started.')
-    }
-
-    const startState = this.getMatchCanStart(room)
-
-    if (!startState.canStart) {
-      throw new Error(startState.reason)
-    }
-
-    room.phase = ROOM_PHASES.ANSWERER_SELECTION
-    room.updatedAt = Date.now()
-    return room
+  if (room.hostPlayerId !== player.playerId) {
+    throw new Error('Only the host can start the match.')
   }
+
+  if (room.phase !== ROOM_PHASES.LOBBY) {
+    throw new Error('Match has already started.')
+  }
+
+  const startState = this.getMatchCanStart(room)
+
+  if (!startState.canStart) {
+    throw new Error(startState.reason)
+  }
+
+  room.game = this.createInitialGameState(room)
+  room.phase = ROOM_PHASES.TURN_IDLE
+  room.updatedAt = Date.now()
+
+  return room
+}
 
   setPlayerReady(socketId, ready) {
     const { room, player } = this.getPlayerContextOrThrow(socketId)
@@ -389,27 +390,38 @@ export class RoomManager {
       ]),
     )
 
-    return {
-      roomId: room.roomId,
-      roomCode: room.roomCode,
-      hostPlayerId: room.hostPlayerId,
-      hostPlayerName: room.players[room.hostPlayerId]?.name ?? null,
-      phase: room.phase,
-      settings: {
-        ...room.settings,
-      },
-      players,
-      teams: {
-        X: {
-          playerIds: [...room.teams.X.playerIds],
-        },
-        O: {
-          playerIds: [...room.teams.O.playerIds],
-        },
-      },
-      createdAt: room.createdAt,
-      updatedAt: room.updatedAt,
-    }
+   return {
+  roomId: room.roomId,
+  roomCode: room.roomCode,
+  hostPlayerId: room.hostPlayerId,
+  hostPlayerName: room.players[room.hostPlayerId]?.name ?? null,
+  phase: room.phase,
+  settings: {
+    ...room.settings,
+  },
+  players,
+  teams: {
+    X: {
+      playerIds: [...room.teams.X.playerIds],
+    },
+    O: {
+      playerIds: [...room.teams.O.playerIds],
+    },
+  },
+  game: room.game
+    ? {
+        board: [...room.game.board],
+        currentTurnTeam: room.game.currentTurnTeam,
+        currentStage: room.game.currentStage,
+        maxStages: room.game.maxStages,
+        stageScores: { ...room.game.stageScores },
+        stageLocked: room.game.stageLocked,
+        matchComplete: room.game.matchComplete,
+      }
+    : null,
+  createdAt: room.createdAt,
+  updatedAt: room.updatedAt,
+}
   }
 
   getConnectedPlayers(room) {

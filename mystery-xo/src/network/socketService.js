@@ -296,7 +296,7 @@ function getLastError() {
 }
 
 function isMultiplayerActive() {
-  return Boolean(state.room?.game)
+  return Boolean(state.game ?? state.room?.game)
 }
 
 export const socketService = {
