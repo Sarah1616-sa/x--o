@@ -2,14 +2,19 @@
    Tap an option to select (locks all); reveal shows correct/wrong. */
 import { h } from '../dom.js'
 
-export function QuestionDialog({ question, who, onSelect }) {
+export function QuestionDialog({ question, who, onSelect, answerable = true }) {
   const optionEls = question.options.map((opt, i) =>
-    h('button', { class: 'qoption', type: 'button', onClick: () => onSelect(i) }, opt),
+    h('button', {
+      class: 'qoption',
+      type: 'button',
+      style: answerable ? null : { pointerEvents: 'none' },
+      onClick: answerable ? () => onSelect(i) : undefined,
+    }, opt),
   )
   const timerEl = h('div', { class: 'qtimer' }, '')
 
   const dialog = h('div', { class: 'dialog', style: { textAlign: 'start' } },
-    h('p', { class: 'qhead' }, `دور الفريق ${who.team} — اللاعب ${who.number}`),
+    h('p', { class: 'qhead' }, answerable ? `دور الفريق ${who.team} — اللاعب ${who.number}` : `الفريق ${who.team} يجيب الآن…`),
     h('div', { style: { textAlign: 'center' } }, timerEl),
     h('h3', { class: 'qprompt' }, question.question),
     h('div', { class: 'qoptions' }, ...optionEls),

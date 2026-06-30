@@ -25,6 +25,15 @@ function broadcastHostChanged(io, room) {
   })
 }
 
+// The authoritative game snapshot — the single in-game state event clients render from.
+function broadcastGameSnapshot(io, room) {
+  const snapshot = roomManager.buildRoomSnapshot(room)
+  io.to(room.roomCode).emit('game:snapshot', {
+    room: snapshot,
+    game: snapshot.game,
+  })
+}
+
 export function registerSocketHandlers(io) {
   io.on('connection', (socket) => {
     socket.on('room:create', (payload = {}) => {
@@ -124,72 +133,46 @@ export function registerSocketHandlers(io) {
     socket.on('match:start', () => {
       try {
         const room = roomManager.startMatch(socket.id)
+        // wire the engine's broadcaster (also drives its internal question/stage timers)
+        room.engine.emit = () => broadcastGameSnapshot(io, room)
         io.to(room.roomCode).emit('match:starting', {
           phase: room.phase,
           room: roomManager.buildRoomSnapshot(room),
         })
         broadcastRoomUpdate(io, room)
+        room.engine.start()
       } catch (error) {
         emitSocketError(socket, 'action:error', error.message)
       }
     })
 
+    // In-game intents — all delegate to the authoritative engine, which broadcasts
+    // game:snapshot on every state change (incl. its own question/stage timers).
     socket.on('cell:select', (payload = {}) => {
       try {
-        const { room, outcome } = roomManager.selectCell(socket.id, Number(payload.cellIndex))
-        const snapshot = roomManager.buildRoomSnapshot(room)
+        const { room, player } = roomManager.getPlayerContextOrThrow(socket.id)
+        if (!room.engine) throw new Error('Game has not started.')
+        room.engine.selectCell(player.team, Number(payload.cellIndex))
+      } catch (error) {
+        emitSocketError(socket, 'action:error', error.message)
+      }
+    })
 
-        io.to(room.roomCode).emit('game:snapshot', {
-          room: snapshot,
-          game: snapshot.game,
-        })
+    socket.on('ability:activate', (payload = {}) => {
+      try {
+        const { room, player } = roomManager.getPlayerContextOrThrow(socket.id)
+        if (!room.engine) throw new Error('Game has not started.')
+        room.engine.activateAbility(player.team, payload.ability)
+      } catch (error) {
+        emitSocketError(socket, 'action:error', error.message)
+      }
+    })
 
-        io.to(room.roomCode).emit('board:update', {
-          board: snapshot.game.board,
-          currentTurnTeam: snapshot.game.currentTurnTeam,
-          room: snapshot,
-          game: snapshot.game,
-        })
-
-        if (outcome.type === 'STAGE_END') {
-          io.to(room.roomCode).emit('stage:end', {
-            winner: outcome.winner,
-            room: snapshot,
-            game: snapshot.game,
-          })
-
-          setTimeout(() => {
-            const nextRoom = roomManager.advanceToNextStage(room.roomCode)
-            const nextSnapshot = roomManager.buildRoomSnapshot(nextRoom)
-
-            io.to(nextRoom.roomCode).emit('game:snapshot', {
-              room: nextSnapshot,
-              game: nextSnapshot.game,
-            })
-
-            io.to(nextRoom.roomCode).emit('turn:started', {
-              currentTurnTeam: nextSnapshot.game.currentTurnTeam,
-              room: nextSnapshot,
-              game: nextSnapshot.game,
-            })
-          }, 1500)
-        }
-
-        if (outcome.type === 'MATCH_END') {
-          io.to(room.roomCode).emit('match:end', {
-            winner: outcome.winner,
-            room: snapshot,
-            game: snapshot.game,
-          })
-        }
-
-        if (outcome.type === 'TURN_SWITCHED') {
-          io.to(room.roomCode).emit('turn:started', {
-            currentTurnTeam: snapshot.game.currentTurnTeam,
-            room: snapshot,
-            game: snapshot.game,
-          })
-        }
+    socket.on('answer:select', (payload = {}) => {
+      try {
+        const { room, player } = roomManager.getPlayerContextOrThrow(socket.id)
+        if (!room.engine) throw new Error('Game has not started.')
+        room.engine.submitAnswer(player.team, Number(payload.answerIndex))
       } catch (error) {
         emitSocketError(socket, 'action:error', error.message)
       }

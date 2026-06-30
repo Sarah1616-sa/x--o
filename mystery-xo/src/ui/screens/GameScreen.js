@@ -1,21 +1,13 @@
 /* ============================================================
-   GameScreen — the in-game experience (full DOM/CSS rebuild of the
-   1537-line Phaser GameScene). Dual mode, exactly as the original:
-     • LOCAL  : the full game runs client-side via the preserved
-                pure systems (TurnResolver / Ability / Question / Match).
-     • SYNC   : when socketService.isMultiplayerActive() (server populates
-                room.game), the board mirrors server events and the
-                client-only abilities/questions are disabled.
-   Abilities are armed by TAP (not drag — drag needed tweens the skill bans).
+   GameScreen — server-authoritative online game (no local mode).
+   The server runs the whole game (questions / abilities / turns /
+   stages) over the shared systems and broadcasts `game:snapshot`.
+   This screen is a thin client: it RENDERS from the snapshot and
+   SENDS intents (cell:select / ability:activate / answer:select).
+   It holds no game rules of its own.
    ============================================================ */
-import { h, button, topbar, logo } from '../dom.js'
+import { h, button, topbar, logo, toast } from '../dom.js'
 import { socketService } from '../../network/socketService.js'
-import { QUESTION_BANK } from '../../game/data/questions.js'
-import { MAX_STAGES, QUESTION_TIME_LIMIT } from '../../game/constants/gameConstants.js'
-import { QuestionSystem } from '../../game/systems/QuestionSystem.js'
-import { MatchSystem } from '../../game/systems/MatchSystem.js'
-import { AbilitySystem } from '../../game/systems/AbilitySystem.js'
-import { TurnResolver } from '../../game/systems/TurnResolver.js'
 import { InfoBar } from '../game/InfoBar.js'
 import { Board } from '../game/Board.js'
 import { AbilityBar } from '../game/AbilityBar.js'
@@ -27,53 +19,25 @@ const WINNING_LINES = [
   [0, 3, 6], [1, 4, 7], [2, 5, 8],
   [0, 4, 8], [2, 4, 6],
 ]
-
-const REVEAL_MS = 750
-const STAGE_PAUSE_MS = 2000
+const ABILITY_KEYS = ['power', 'shield', 'steal', 'trap']
 
 export function GameScreen(nav, { room } = {}) {
-  // ---- preserved game logic (pure systems) ----
-  const questionSystem = new QuestionSystem({ questionBank: QUESTION_BANK, questionTimeLimit: QUESTION_TIME_LIMIT })
-  const matchSystem = new MatchSystem({ maxStages: room?.settings?.stageCount ?? MAX_STAGES })
-  const abilitySystem = new AbilitySystem()
-  const turnResolver = new TurnResolver({ abilitySystem, matchSystem, winningLines: WINNING_LINES })
-
-  const teamSizes = room?.teams
-    ? { X: room.teams.X?.playerIds?.length || 1, O: room.teams.O?.playerIds?.length || 1 }
-    : { X: 1, O: 1 }
-  const isMultiplayerMode = socketService.isMultiplayerActive?.() ?? false
-
-  // ---- view state ----
-  let board = emptyBoard()
-  let currentPlayer = 'X'
-  let pendingCellIndex = null
-  let answerLocked = false
-  let resolving = false // guards the submit/timeout mutual-exclusion (no double-resolve)
-  let winningLine = null
-  let banner = null // stage win/draw line; part of render state so it can't be clobbered
-  let timerId = null
-  let destroyed = false
-  const pendingTimeouts = []
+  let game = null // latest authoritative snapshot
   let questionDialog = null
+  let questionSeq = null // server's question id the current dialog is showing
   let matchEndEl = null
   const unsubs = []
 
-  // setTimeout that is tracked + auto-cancelled on teardown (Phaser's delayedCall
-  // was scene-scoped and auto-cleared; raw setTimeout is not, so we track ids).
-  function later(fn, ms) {
-    const id = setTimeout(() => {
-      const idx = pendingTimeouts.indexOf(id)
-      if (idx >= 0) pendingTimeouts.splice(idx, 1)
-      if (!destroyed) fn()
-    }, ms)
-    pendingTimeouts.push(id)
-    return id
+  // Resolve my team lazily from the freshest source (survives a late identity).
+  function myTeam() {
+    const id = socketService.getSelfPlayerId?.()
+    return socketService.getRoomSnapshot?.()?.players?.[id]?.team ?? room?.players?.[id]?.team ?? null
   }
 
-  // ---- components ----
+  // ---- components (dumb renderers; click handlers send intents) ----
   const infoBar = InfoBar()
-  const boardComp = Board((i) => handleCellClick(i))
-  const abilityBar = AbilityBar((key) => onArm(key))
+  const board = Board((i) => onCell(i))
+  const abilityBar = AbilityBar((key) => onAbility(key))
 
   const el = h('main', { class: 'screen' },
     h('header', { class: 'screen__top' },
@@ -86,273 +50,134 @@ export function GameScreen(nav, { room } = {}) {
     ),
     h('div', { class: 'screen__body', style: { justifyContent: 'space-between', gap: 'var(--s-4)' } },
       infoBar.el,
-      h('div', { style: { flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '0', width: '100%' } }, boardComp.el),
+      h('div', { style: { flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '0', width: '100%' } }, board.el),
       abilityBar.el,
     ),
   )
 
-  function emptyBoard() {
-    return [[null, null, null], [null, null, null], [null, null, null]]
+  /* -------------------- intents (server is authoritative + re-validates) -------------------- */
+  function myTurn() {
+    return Boolean(game) && game.phase === 'TURN_IDLE' && game.currentTurnTeam === myTeam()
   }
-  function setCell(index, team) {
-    board[Math.floor(index / 3)][index % 3] = team
+  function onCell(i) {
+    if (myTurn()) socketService.selectCell(i)
+  }
+  function onAbility(key) {
+    if (myTurn()) socketService.activateAbility(key)
   }
 
-  /* -------------------- cell click / turn resolution -------------------- */
-  function handleCellClick(index) {
-  if (isMultiplayerMode) {
-    try {
-      socketService.selectCell(index)
-    } catch (e) {
-      console.error(e)
+  /* -------------------- render from the snapshot -------------------- */
+  function render(g) {
+    if (!g) return
+    game = g
+
+    const mine = myTeam()
+    const turnText =
+      g.phase === 'MATCH_END'
+        ? ''
+        : g.banner ?? (g.currentTurnTeam === mine ? 'دورك' : `دور الفريق ${g.currentTurnTeam}`)
+    infoBar.update({
+      currentPlayer: g.currentTurnTeam,
+      currentStage: g.currentStage,
+      maxStages: g.maxStages,
+      stageScores: g.stageScores,
+      banner: turnText,
+    })
+
+    board.render({
+      board: flatToMatrix(g.board || []),
+      winLine: computeWinLine(g),
+      targets: targets(g),
+      protectedSet: new Set(g.protectedSquares || []),
+    })
+
+    abilityBar.update(mapAbilities(g.abilities?.[mine]))
+    syncQuestion(g)
+
+    if (g.phase === 'MATCH_END') showMatchEnd(g)
+    else if (matchEndEl) { matchEndEl.remove(); matchEndEl = null }
+  }
+
+  function mapAbilities(a) {
+    const s = a || {}
+    return {
+      power: { state: s.power || 'disabled' },
+      shield: { state: s.shield || 'disabled' },
+      steal: { state: s.steal || 'disabled' },
+      trap: { state: s.trap || 'disabled' },
     }
-
-    return
   }
 
-  applyTurnResult(turnResolver.handleCellClick({
-    index,
-    board,
-    currentPlayer,
-    matchComplete: matchSystem.matchComplete,
-    stageLocked: matchSystem.stageLocked,
-    questionOpen: questionSystem.questionOpen,
-  }))
-}
-
-
-  function applyBoardOutcome(team) {
-    applyTurnResult(turnResolver.resolveBoardOutcome(board, team))
-  }
-
-  function switchTurn() {
-    currentPlayer = currentPlayer === 'X' ? 'O' : 'X'
-    abilitySystem.clearArmedAbilities()
-    render()
-  }
-
-  /* -------------------- abilities (tap to arm / disarm) -------------------- */
-  function armedKey() {
-    if (abilitySystem.powerArmedTeam === currentPlayer) return 'power'
-    if (abilitySystem.shieldArmedTeam === currentPlayer) return 'shield'
-    if (abilitySystem.stealArmedTeam === currentPlayer) return 'steal'
-    if (abilitySystem.trapArmedTeam === currentPlayer) return 'trap'
+  function computeWinLine(g) {
+    // only on the stage-end pause (match-end is covered by the dialog scrim)
+    if (g.phase !== 'STAGE_END') return null
+    const flat = g.board || []
+    for (const team of ['X', 'O']) {
+      const line = WINNING_LINES.find((l) => l.every((i) => flat[i] === team))
+      if (line) return line
+    }
     return null
   }
 
-  function abilityCtx() {
-    return {
-      board,
-      currentPlayer,
-      matchComplete: matchSystem.matchComplete,
-      stageLocked: matchSystem.stageLocked,
-      questionOpen: questionSystem.questionOpen,
-    }
-  }
-
-  function onArm(key) {
-    if (isMultiplayerMode) return
-    if (armedKey() === key) { abilitySystem.clearArmedAbilities(); render(); return }
-    const ctx = abilityCtx()
-    if (key === 'power' && abilitySystem.canActivatePower(ctx)) abilitySystem.activatePower(currentPlayer)
-    else if (key === 'shield' && abilitySystem.canActivateShield(ctx)) abilitySystem.activateShield(currentPlayer)
-    else if (key === 'steal' && abilitySystem.canActivateSteal(ctx)) abilitySystem.activateSteal(currentPlayer)
-    else if (key === 'trap' && abilitySystem.canActivateTrap(ctx)) abilitySystem.activateTrap(currentPlayer)
-    render()
-  }
-
-  function abilityStates() {
-    const armed = armedKey()
-    const ctx = abilityCtx()
-    const make = (key, remaining, canActivate) => {
-      let state
-      if (armed === key) state = 'armed'
-      else if (remaining <= 0) state = 'used'
-      else if (canActivate && !isMultiplayerMode) state = 'enabled'
-      else state = 'disabled'
-      return { state, count: remaining }
-    }
-    return {
-      power: make('power', abilitySystem.powerRemaining[currentPlayer], abilitySystem.canActivatePower(ctx)),
-      shield: make('shield', abilitySystem.shieldRemaining[currentPlayer], abilitySystem.canActivateShield(ctx)),
-      steal: make('steal', abilitySystem.stealRemaining[currentPlayer], abilitySystem.canActivateSteal(ctx)),
-      trap: make('trap', abilitySystem.trapRemaining[currentPlayer], abilitySystem.canActivateTrap(ctx)),
-    }
-  }
-
-  function targetsForArmed() {
+  // gold target outlines for my armed ability (server still validates the drop)
+  function targets(g) {
     const set = new Set()
-    const armed = armedKey()
+    const team = myTeam()
+    if (g.currentTurnTeam !== team || g.phase !== 'TURN_IDLE') return set
+    const a = g.abilities?.[team] || {}
+    const armed = ABILITY_KEYS.find((k) => a[k] === 'armed')
     if (!armed) return set
+    const flat = g.board || []
+    const prot = new Set(g.protectedSquares || [])
     for (let i = 0; i < 9; i += 1) {
-      const empty = turnResolver.isSquareEmpty(board, i)
-      if (armed === 'steal' && turnResolver.isSquareOwnedByOpponent(board, i, currentPlayer) && abilitySystem.canFutureAbilityModifySquare(i)) set.add(i)
-      else if (armed === 'shield' && turnResolver.isSquareOwnedByCurrentTeam(board, i, currentPlayer) && !abilitySystem.isSquareProtected(i)) set.add(i)
-      else if (armed === 'trap' && empty && !abilitySystem.trapSquares.has(i)) set.add(i)
-      else if (armed === 'power' && empty) set.add(i)
+      const v = flat[i]
+      if (armed === 'power' && v === null) set.add(i)
+      else if (armed === 'shield' && v === team && !prot.has(i)) set.add(i)
+      else if (armed === 'steal' && v && v !== team && !prot.has(i)) set.add(i)
+      else if (armed === 'trap' && v === null) set.add(i)
     }
     return set
   }
 
-  /* -------------------- question flow -------------------- */
-  function openQuestion(question) {
-    answerLocked = false
-    questionSystem.openQuestion(question, { team: currentPlayer, teamSize: teamSizes[currentPlayer] })
-    questionDialog = QuestionDialog({
-      question,
-      who: { team: currentPlayer, number: questionSystem.activeAnswererNumber },
-      onSelect: (i) => selectAnswer(i),
-    })
-    el.append(questionDialog.el)
-    questionDialog.setTimer(questionSystem.questionTimeRemaining)
-    startTimer()
-    render()
+  function syncQuestion(g) {
+    const q = g.question
+    if (!q) {
+      if (questionDialog) { questionDialog.el.remove(); questionDialog = null; questionSeq = null }
+      return
+    }
+    // keyed on the server's question seq so a new question always gets a fresh dialog
+    if (!questionDialog || q.seq !== questionSeq) {
+      if (questionDialog) questionDialog.el.remove()
+      questionSeq = q.seq
+      questionDialog = QuestionDialog({
+        question: { question: q.prompt, options: q.options },
+        who: { team: q.answeringTeam, number: q.answererNumber },
+        answerable: q.answeringTeam === myTeam(),
+        onSelect: (i) => {
+          const cur = game?.question
+          if (cur && cur.answeringTeam === myTeam() && !cur.reveal) {
+            questionDialog.markSelected(i) // optimistic lock until the reveal snapshot lands
+            socketService.submitAnswer(i)
+          }
+        },
+      })
+      el.append(questionDialog.el)
+    }
+    questionDialog.setTimer(q.timeRemaining)
+    if (q.reveal) questionDialog.reveal(q.reveal.selectedIndex, q.reveal.correctIndex)
   }
 
-  function selectAnswer(i) {
-    if (resolving || answerLocked) return
-    if (!questionSystem.setAnswer(i)) return
-    answerLocked = true
-    stopTimer() // stop ticks the moment an answer is locked — kills the timeout race
-    questionDialog.markSelected(i)
-    later(submitAnswer, 450)
-  }
-
-  function submitAnswer() {
-    if (resolving || !questionSystem.questionOpen || !questionSystem.hasAnswer()) return
-    resolving = true
-    stopTimer()
-    const correctIndex = questionSystem.activeQuestion.correctAnswerIndex
-    const isCorrect = questionSystem.isAnswerCorrect()
-    if (questionDialog) questionDialog.reveal(questionSystem.selectedAnswerIndex, correctIndex)
-    later(() => {
-      closeQuestion()
-      if (isCorrect) {
-        applyTurnResult(turnResolver.resolvePendingCell({ board, pendingCellIndex, currentPlayer }))
-      } else {
-        pendingCellIndex = null
-        applyTurnResult(turnResolver.resolveIncorrectAnswer())
-      }
-    }, REVEAL_MS)
-  }
-
-  function handleTimeout() {
-    if (resolving || !questionSystem.questionOpen) return
-    resolving = true
-    stopTimer()
-    pendingCellIndex = null
-    if (questionDialog) questionDialog.reveal(-1, questionSystem.activeQuestion.correctAnswerIndex)
-    later(() => {
-      closeQuestion()
-      applyTurnResult(turnResolver.resolveQuestionTimeout())
-    }, REVEAL_MS)
-  }
-
-  function closeQuestion() {
-    stopTimer()
-    resolving = false
-    if (questionDialog) { questionDialog.el.remove(); questionDialog = null }
-    questionSystem.closeQuestion()
-  }
-
-  function startTimer() {
-    stopTimer()
-    timerId = setInterval(() => {
-      if (!questionSystem.questionOpen) { stopTimer(); return }
-      const { expired, timeRemaining } = questionSystem.tickTimer()
-      if (questionDialog) questionDialog.setTimer(timeRemaining)
-      if (expired) handleTimeout()
-    }, 1000)
-  }
-  function stopTimer() {
-    if (timerId) { clearInterval(timerId); timerId = null }
-  }
-
-  /* -------------------- stage / match end -------------------- */
-  function declareStageWinner(team) {
-    matchSystem.lockStage()
-    winningLine = findWinningLine(team)
-    matchSystem.awardStagePoint(team)
-    banner = `فاز الفريق ${team} بالجولة`
-    render()
-    later(advanceOrFinish, STAGE_PAUSE_MS)
-  }
-  function declareStageDraw() {
-    matchSystem.lockStage()
-    banner = 'تعادل الجولة'
-    render()
-    later(advanceOrFinish, STAGE_PAUSE_MS)
-  }
-  function advanceOrFinish() {
-    const { matchComplete } = matchSystem.advanceStageOrCompleteMatch()
-    if (matchComplete) showMatchEnd(matchSystem.getMatchWinner())
-    else resetStage()
-  }
-  function resetStage() {
-    board = emptyBoard()
-    winningLine = null
-    banner = null
-    abilitySystem.resetStageState()
-    pendingCellIndex = null
-    questionSystem.resetAnswer()
-    matchSystem.resetStageState()
-    currentPlayer = 'X'
-    render()
-  }
-  function findWinningLine(team) {
-    const flat = board.flat()
-    return WINNING_LINES.find((line) => line.every((i) => flat[i] === team)) ?? null
-  }
-
-  function showMatchEnd(winner) {
-    if (matchEndEl) matchEndEl.remove()
+  function showMatchEnd(g) {
+    if (matchEndEl) return
     matchEndEl = MatchEndDialog({
-      winner,
-      stageScores: matchSystem.stageScores,
-      onPlayAgain: resetMatch,
+      winner: g.matchWinner,
+      stageScores: g.stageScores,
+      onPlayAgain: null, // server-authoritative: no local replay
       onLeave: leaveGame,
     })
     el.append(matchEndEl)
   }
-  function resetMatch() {
-    if (matchEndEl) { matchEndEl.remove(); matchEndEl = null }
-    closeQuestion()
-    matchSystem.resetMatchState()
-    abilitySystem.resetMatchState()
-    questionSystem.resetQuestionIndex()
-    questionSystem.resetAnswererRotation()
-    resetStage()
-  }
 
-  /* -------------------- multiplayer sync (dormant unless server sends game) -------------------- */
-  function setupMultiplayer() {
-    if (!isMultiplayerMode) return
-    applyServerSnapshot(socketService.getGameSnapshot())
-    const listen = (ev, fn) => unsubs.push(socketService.on(ev, fn))
-    listen('game:snapshot', (p) => applyServerSnapshot(p?.game ?? p?.room?.game))
-    listen('board:update', (p) => applyServerSnapshot(p?.game ?? p?.room?.game))
-    listen('turn:started', (p) => applyServerSnapshot(p?.game ?? p?.room?.game))
-    listen('stage:end', (p) => {
-      applyServerSnapshot(p?.game ?? p?.room?.game)
-      banner = p?.winner ? `فاز الفريق ${p.winner} بالجولة` : 'تعادل الجولة'
-      render()
-    })
-    listen('match:end', (p) => {
-      applyServerSnapshot(p?.game ?? p?.room?.game)
-      showMatchEnd(p?.winner ?? null)
-    })
-  }
-  function applyServerSnapshot(game) {
-    if (!game) return
-    currentPlayer = game.currentTurnTeam ?? 'X'
-    matchSystem.currentStage = game.currentStage ?? 1
-    matchSystem.maxStages = game.maxStages ?? matchSystem.maxStages
-    matchSystem.stageScores = game.stageScores ?? { X: 0, O: 0 }
-    board = flatToMatrix(game.board ?? Array(9).fill(null))
-    winningLine = null
-    banner = null
-    render()
-  }
   function flatToMatrix(flat) {
     return [
       [flat[0] ?? null, flat[1] ?? null, flat[2] ?? null],
@@ -364,38 +189,17 @@ export function GameScreen(nav, { room } = {}) {
   /* -------------------- leave + teardown -------------------- */
   function leaveGame() {
     cleanup()
-    // Returns to the lobby; the room (if any) stays joined and re-renders.
     import('./LobbyScreen.js').then((m) => nav.show(m.LobbyScreen))
   }
   function cleanup() {
-    destroyed = true
-    stopTimer()
-    pendingTimeouts.forEach(clearTimeout)
-    pendingTimeouts.length = 0
     unsubs.forEach((u) => u())
     unsubs.length = 0
   }
 
-  /* -------------------- render -------------------- */
-  function render() {
-    infoBar.update({
-      currentPlayer,
-      currentStage: matchSystem.currentStage,
-      maxStages: matchSystem.maxStages,
-      stageScores: matchSystem.stageScores,
-      banner,
-    })
-    boardComp.render({
-      board,
-      winLine: winningLine,
-      targets: targetsForArmed(),
-      protectedSet: abilitySystem.protectedSquares,
-    })
-    abilityBar.update(abilityStates())
-  }
-
-  setupMultiplayer()
-  render()
+  /* -------------------- wiring -------------------- */
+  unsubs.push(socketService.on('game:snapshot', (p) => render(p?.game ?? p?.room?.game)))
+  unsubs.push(socketService.on('action:error', (p) => { if (p?.message) toast(p.message, { error: true }) }))
+  render(socketService.getGameSnapshot())
 
   return { el, destroy: cleanup }
 }

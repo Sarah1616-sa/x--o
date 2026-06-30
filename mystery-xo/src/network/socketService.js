@@ -279,6 +279,14 @@ function selectCell(cellIndex) {
   })
 }
 
+function activateAbility(ability) {
+  emit(SOCKET_EVENTS.ABILITY_ACTIVATE, { ability })
+}
+
+function submitAnswer(answerIndex) {
+  emit(SOCKET_EVENTS.ANSWER_SELECT, { answerIndex })
+}
+
 function getRoomSnapshot() {
   return clone(state.room)
 }
@@ -315,6 +323,8 @@ export const socketService = {
   updateSettings,
   leaveRoom,
   selectCell,
+  activateAbility,
+  submitAnswer,
   getState,
   getRoomSnapshot,
   getGameSnapshot,

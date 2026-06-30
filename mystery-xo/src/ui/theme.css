@@ -632,6 +632,7 @@ button {
   padding: var(--s-3);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
   gap: var(--s-3);
   width: min(86%, 360px);
   aspect-ratio: 1;
@@ -648,6 +649,10 @@ button {
   cursor: pointer;
   position: relative;
   color: var(--maroon);
+  /* keep every cell an equal square — a placed glyph can't stretch its track */
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 .cell:active {
   background: var(--cream);

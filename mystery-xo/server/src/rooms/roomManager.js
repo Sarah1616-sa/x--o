@@ -8,6 +8,7 @@ import {
   ROOM_PHASES,
 } from '../constants/roomConstants.js'
 import { generateRoomCode } from './roomCode.js'
+import { GameEngine } from '../game/GameEngine.js'
 
 function createReconnectToken() {
   return randomBytes(24).toString('hex')
@@ -78,6 +79,7 @@ function createRoom({ roomCode, maxPlayers, hostPlayer }) {
       X: createTeamState(),
       O: createTeamState(),
     },
+    engine: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   }
@@ -246,29 +248,41 @@ export class RoomManager {
     return { canStart: true, reason: 'Match can start.' }
   }
 
- startMatch(socketId) {
-  const { room, player } = this.getPlayerContextOrThrow(socketId)
+  startMatch(socketId) {
+    const { room, player } = this.getPlayerContextOrThrow(socketId)
 
-  if (room.hostPlayerId !== player.playerId) {
-    throw new Error('Only the host can start the match.')
+    if (room.hostPlayerId !== player.playerId) {
+      throw new Error('Only the host can start the match.')
+    }
+
+    if (room.phase !== ROOM_PHASES.LOBBY) {
+      throw new Error('Match has already started.')
+    }
+
+    const startState = this.getMatchCanStart(room)
+
+    if (!startState.canStart) {
+      throw new Error(startState.reason)
+    }
+
+    const rosterFor = (team) =>
+      room.teams[team].playerIds.map((id) => room.players[id]?.name).filter(Boolean)
+    const rosters = { X: rosterFor('X'), O: rosterFor('O') }
+
+    // Authoritative game engine — runs the full game (questions/abilities/turns)
+    // over the SAME pure systems the client uses. emit() is wired by socket.js.
+    // teamSizes is derived from the same filtered roster so answerer rotation and
+    // the displayed answerer name stay in lockstep.
+    room.engine = new GameEngine({
+      maxStages: room.settings.stageCount,
+      teamSizes: { X: rosters.X.length || 1, O: rosters.O.length || 1 },
+      teamRosters: rosters,
+    })
+    room.phase = ROOM_PHASES.TURN_IDLE
+    room.updatedAt = Date.now()
+
+    return room
   }
-
-  if (room.phase !== ROOM_PHASES.LOBBY) {
-    throw new Error('Match has already started.')
-  }
-
-  const startState = this.getMatchCanStart(room)
-
-  if (!startState.canStart) {
-    throw new Error(startState.reason)
-  }
-
-  room.game = this.createInitialGameState(room)
-  room.phase = ROOM_PHASES.TURN_IDLE
-  room.updatedAt = Date.now()
-
-  return room
-}
 
   setPlayerReady(socketId, ready) {
     const { room, player } = this.getPlayerContextOrThrow(socketId)
@@ -308,6 +322,31 @@ export class RoomManager {
 
     const hostChanged = this.reassignHostIfNeeded(room)
 
+    // In-game disconnect: if a whole team has dropped, end the match for the other
+    // side (no reconnect path yet, so this avoids an unwinnable hang). emit() is
+    // already wired, so the forfeit broadcasts a MATCH_END snapshot to survivors.
+    if (room.engine && !room.engine.isMatchOver()) {
+      const connected = this.getConnectedPlayers(room)
+      const connX = connected.filter((p) => p.team === 'X').length
+      const connO = connected.filter((p) => p.team === 'O').length
+      if (connX === 0 && connO > 0) room.engine.forfeit('O')
+      else if (connO === 0 && connX > 0) room.engine.forfeit('X')
+    }
+
+    // Room fully abandoned → tear down the engine (stops its timers) and delete it.
+    if (this.getConnectedPlayers(room).length === 0) {
+      room.engine?.destroy()
+      room.engine = null
+      this.clearRoomReconnectTokens(room)
+      this.rooms.delete(room.roomCode)
+      return {
+        room: null,
+        destroyed: true,
+        removedPlayer: player,
+        hostChanged: false,
+      }
+    }
+
     return {
       room,
       destroyed: false,
@@ -342,6 +381,7 @@ export class RoomManager {
     this.removePlayerFromRoom(room, player.playerId)
 
     if (this.getRoomPlayerCount(room) === 0) {
+      room.engine?.destroy()
       this.clearRoomReconnectTokens(room)
       this.rooms.delete(room.roomCode)
       return {
@@ -390,38 +430,29 @@ export class RoomManager {
       ]),
     )
 
-   return {
-  roomId: room.roomId,
-  roomCode: room.roomCode,
-  hostPlayerId: room.hostPlayerId,
-  hostPlayerName: room.players[room.hostPlayerId]?.name ?? null,
-  phase: room.phase,
-  settings: {
-    ...room.settings,
-  },
-  players,
-  teams: {
-    X: {
-      playerIds: [...room.teams.X.playerIds],
-    },
-    O: {
-      playerIds: [...room.teams.O.playerIds],
-    },
-  },
-  game: room.game
-    ? {
-        board: [...room.game.board],
-        currentTurnTeam: room.game.currentTurnTeam,
-        currentStage: room.game.currentStage,
-        maxStages: room.game.maxStages,
-        stageScores: { ...room.game.stageScores },
-        stageLocked: room.game.stageLocked,
-        matchComplete: room.game.matchComplete,
-      }
-    : null,
-  createdAt: room.createdAt,
-  updatedAt: room.updatedAt,
-}
+    return {
+      roomId: room.roomId,
+      roomCode: room.roomCode,
+      hostPlayerId: room.hostPlayerId,
+      hostPlayerName: room.players[room.hostPlayerId]?.name ?? null,
+      phase: room.phase,
+      settings: {
+        ...room.settings,
+      },
+      players,
+      teams: {
+        X: {
+          playerIds: [...room.teams.X.playerIds],
+        },
+        O: {
+          playerIds: [...room.teams.O.playerIds],
+        },
+      },
+      // authoritative game state from the engine (null until the match starts)
+      game: room.engine ? room.engine.snapshot() : null,
+      createdAt: room.createdAt,
+      updatedAt: room.updatedAt,
+    }
   }
 
   getConnectedPlayers(room) {
@@ -526,128 +557,6 @@ export class RoomManager {
   getRoomPlayerCount(room) {
     return Object.keys(room.players).length
   }
-  createInitialGameState(room) {
-  return {
-    board: Array(9).fill(null),
-    currentTurnTeam: 'X',
-    currentStage: 1,
-    maxStages: room.settings.stageCount,
-    stageScores: { X: 0, O: 0 },
-    stageLocked: false,
-    matchComplete: false,
-  }
-}
-
-getWinningTeam(board) {
-  const lines = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-    [0, 3, 6],
-    [1, 4, 7],
-    [2, 5, 8],
-    [0, 4, 8],
-    [2, 4, 6],
-  ]
-
-  for (const [a, b, c] of lines) {
-    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-      return board[a]
-    }
-  }
-
-  return null
-}
-
-isBoardFull(board) {
-  return board.every(Boolean)
-}
-
-selectCell(socketId, cellIndex) {
-  const { room, player } = this.getPlayerContextOrThrow(socketId)
-
-  if (room.phase !== ROOM_PHASES.TURN_IDLE) {
-    throw new Error('It is not time to select a cell.')
-  }
-
-  if (!room.game) {
-    throw new Error('Game has not started.')
-  }
-
-  if (room.game.stageLocked || room.game.matchComplete) {
-    throw new Error('Stage or match is locked.')
-  }
-
-  if (player.team !== room.game.currentTurnTeam) {
-    throw new Error('It is not your team turn.')
-  }
-
-  if (!Number.isInteger(cellIndex) || cellIndex < 0 || cellIndex > 8) {
-    throw new Error('Invalid cell index.')
-  }
-
-  if (room.game.board[cellIndex]) {
-    throw new Error('Cell is already occupied.')
-  }
-
-  const team = room.game.currentTurnTeam
-  room.game.board[cellIndex] = team
-
-  const winner = this.getWinningTeam(room.game.board)
-
-  if (winner) {
-    room.game.stageScores[winner] += 1
-    room.game.stageLocked = true
-
-    if (room.game.currentStage >= room.game.maxStages) {
-      room.game.matchComplete = true
-      room.phase = ROOM_PHASES.MATCH_END
-      room.updatedAt = Date.now()
-      return { room, outcome: { type: 'MATCH_END', winner } }
-    }
-
-    room.phase = ROOM_PHASES.STAGE_END
-    room.updatedAt = Date.now()
-    return { room, outcome: { type: 'STAGE_END', winner } }
-  }
-
-  if (this.isBoardFull(room.game.board)) {
-    room.game.stageLocked = true
-
-    if (room.game.currentStage >= room.game.maxStages) {
-      room.game.matchComplete = true
-      room.phase = ROOM_PHASES.MATCH_END
-      room.updatedAt = Date.now()
-      return { room, outcome: { type: 'MATCH_END', winner: null } }
-    }
-
-    room.phase = ROOM_PHASES.STAGE_END
-    room.updatedAt = Date.now()
-    return { room, outcome: { type: 'STAGE_END', winner: null } }
-  }
-
-  room.game.currentTurnTeam = team === 'X' ? 'O' : 'X'
-  room.updatedAt = Date.now()
-
-  return { room, outcome: { type: 'TURN_SWITCHED' } }
-}
-
-advanceToNextStage(roomCode) {
-  const room = this.getRoomOrThrow(roomCode)
-
-  if (!room.game || room.phase !== ROOM_PHASES.STAGE_END) {
-    return room
-  }
-
-  room.game.currentStage += 1
-  room.game.board = Array(9).fill(null)
-  room.game.currentTurnTeam = 'X'
-  room.game.stageLocked = false
-  room.phase = ROOM_PHASES.TURN_IDLE
-  room.updatedAt = Date.now()
-
-  return room
-}
 }
 
 export const roomManager = new RoomManager()

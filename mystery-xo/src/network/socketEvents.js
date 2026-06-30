@@ -18,6 +18,8 @@ export const SOCKET_EVENTS = {
   // These were referenced by socketService.js but missing here, so they resolved to
   // `undefined` and the in-game sync path could never bind. Added to complete the contract.
   CELL_SELECT: 'cell:select',
+  ABILITY_ACTIVATE: 'ability:activate',
+  ANSWER_SELECT: 'answer:select',
   GAME_SNAPSHOT: 'game:snapshot',
   BOARD_UPDATE: 'board:update',
   TURN_STARTED: 'turn:started',
