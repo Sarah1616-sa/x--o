@@ -97,14 +97,12 @@ button {
   display: flex;
   justify-content: center;
   overflow: hidden;
+  /* brand wallpaper — the X/O red field image (replaces the CSS dotted recipe) */
   background-color: var(--bg-bottom);
-  background-image:
-    radial-gradient(var(--bg-dot) 1.6px, transparent 1.8px),
-    radial-gradient(var(--bg-dot) 1.6px, transparent 1.8px),
-    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
-  background-size: 104px 96px, 104px 96px, 100% 100%;
-  background-position: 0 0, 52px 48px, 0 0;
-  background-repeat: repeat, repeat, no-repeat;
+  background-image: url("/background.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 /* phone-width screen column */
