@@ -252,6 +252,20 @@ function startMatch() {
   emit(SOCKET_EVENTS.MATCH_START)
 }
 
+function setTeam(team) {
+  emit(SOCKET_EVENTS.ROOM_SET_TEAM, { team })
+}
+
+function leaveRoom() {
+  emit(SOCKET_EVENTS.ROOM_LEAVE)
+  state.room = null
+  state.game = null
+}
+
+function updateSettings(patch) {
+  emit(SOCKET_EVENTS.ROOM_UPDATE_SETTINGS, patch)
+}
+
 function selectCell(cellIndex) {
   const roomCode = state.room?.roomCode
 
@@ -297,6 +311,9 @@ export const socketService = {
   ready,
   unready,
   startMatch,
+  setTeam,
+  updateSettings,
+  leaveRoom,
   selectCell,
   getState,
   getRoomSnapshot,

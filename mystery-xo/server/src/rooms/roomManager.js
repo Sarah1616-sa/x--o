@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import {
   DEFAULT_QUESTION_CATEGORY,
   DEFAULT_STAGE_COUNT,
+  DEFAULT_TEAM_COLORS,
   DEFAULT_TIMER_DURATION,
   PLAYER_ROLES,
   ROOM_PHASES,
@@ -18,6 +19,7 @@ function createDefaultSettings(maxPlayers) {
     timerDuration: DEFAULT_TIMER_DURATION,
     stageCount: DEFAULT_STAGE_COUNT,
     questionCategory: DEFAULT_QUESTION_CATEGORY,
+    teamColors: { ...DEFAULT_TEAM_COLORS },
   }
 }
 
@@ -183,37 +185,62 @@ export class RoomManager {
       room.settings.questionCategory = nextSettings.questionCategory
     }
 
+    if (nextSettings.teamColors !== undefined) {
+      room.settings.teamColors = {
+        ...room.settings.teamColors,
+        ...nextSettings.teamColors,
+      }
+    }
+
+    room.updatedAt = Date.now()
+    return room
+  }
+
+  setPlayerTeam(socketId, team) {
+    const { room, player } = this.getPlayerContextOrThrow(socketId)
+
+    if (room.phase !== ROOM_PHASES.LOBBY) {
+      throw new Error('Teams can only change in the lobby.')
+    }
+
+    if (team !== 'X' && team !== 'O') {
+      throw new Error('Invalid team.')
+    }
+
+    if (player.team === team) {
+      return room
+    }
+
+    room.teams[player.team].playerIds = room.teams[player.team].playerIds.filter((id) => id !== player.playerId)
+    player.team = team
+    player.role = getPlayerRole(room.teams[team].playerIds.length)
+    player.ready = false
+    room.teams[team].playerIds.push(player.playerId)
     room.updatedAt = Date.now()
     return room
   }
 
   getMatchCanStart(room) {
     const connectedPlayers = this.getConnectedPlayers(room)
-    const connectedCount = connectedPlayers.length
-    const playerCount = this.getRoomPlayerCount(room)
 
     if (room.phase !== ROOM_PHASES.LOBBY) {
       return { canStart: false, reason: 'Match has already started.' }
     }
 
-    if (playerCount < 2) {
-      return { canStart: false, reason: 'Room must have at least 2 players.' }
+    if (connectedPlayers.length < 2) {
+      return { canStart: false, reason: 'Room must have at least 2 connected players.' }
     }
 
-    if (connectedCount !== room.settings.maxPlayers) {
-      return { canStart: false, reason: 'Room must be full.' }
-    }
+    const connectedX = connectedPlayers.filter((player) => player.team === 'X').length
+    const connectedO = connectedPlayers.filter((player) => player.team === 'O').length
 
-    if (playerCount % 2 !== 0) {
-      return { canStart: false, reason: 'Player count must be even.' }
+    // Teams may be uneven and the total may be odd — only require both sides exist.
+    if (connectedX < 1 || connectedO < 1) {
+      return { canStart: false, reason: 'Each team needs at least one connected player.' }
     }
 
     if (connectedPlayers.some((player) => !player.ready)) {
       return { canStart: false, reason: 'Every connected player must be ready.' }
-    }
-
-    if (room.teams.X.playerIds.length !== room.teams.O.playerIds.length) {
-      return { canStart: false, reason: 'Teams must have the same number of players.' }
     }
 
     return { canStart: true, reason: 'Match can start.' }

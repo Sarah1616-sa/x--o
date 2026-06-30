@@ -1,4 +1,4 @@
-import { ALLOWED_MAX_PLAYERS } from '../constants/roomConstants.js'
+import { MAX_ROOM_PLAYERS, MIN_ROOM_PLAYERS } from '../constants/roomConstants.js'
 
 function normalizePlayerName(playerName) {
   return typeof playerName === 'string' ? playerName.trim() : ''
@@ -19,8 +19,8 @@ export function validatePlayerName(playerName) {
 }
 
 export function validateMaxPlayers(maxPlayers) {
-  if (!ALLOWED_MAX_PLAYERS.includes(maxPlayers)) {
-    throw new Error(`Max players must be one of: ${ALLOWED_MAX_PLAYERS.join(', ')}`)
+  if (!Number.isInteger(maxPlayers) || maxPlayers < MIN_ROOM_PLAYERS || maxPlayers > MAX_ROOM_PLAYERS) {
+    throw new Error(`Max players must be an integer between ${MIN_ROOM_PLAYERS} and ${MAX_ROOM_PLAYERS}.`)
   }
 
   return maxPlayers
@@ -64,11 +64,46 @@ export function validateQuestionCategory(questionCategory) {
   return normalizedCategory
 }
 
+function isHexColor(value) {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)
+}
+
+export function validateTeamColors(teamColors) {
+  if (teamColors === null || teamColors === undefined) {
+    return undefined
+  }
+
+  if (typeof teamColors !== 'object') {
+    throw new Error('Team colors must be an object.')
+  }
+
+  const result = {}
+
+  for (const key of ['X', 'O']) {
+    if (teamColors[key] !== undefined) {
+      if (!isHexColor(teamColors[key])) {
+        throw new Error('Team colors must be #rrggbb hex values.')
+      }
+
+      result[key] = teamColors[key].toLowerCase()
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
 export function validateRoomSettingsPatch(patch = {}) {
   const validatedPatch = {}
 
   if (patch.maxPlayers !== undefined) {
     validatedPatch.maxPlayers = validateMaxPlayers(patch.maxPlayers)
+  }
+
+  if (patch.teamColors !== undefined) {
+    const colors = validateTeamColors(patch.teamColors)
+    if (colors) {
+      validatedPatch.teamColors = colors
+    }
   }
 
   if (patch.timerDuration !== undefined) {

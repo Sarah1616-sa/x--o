@@ -99,6 +99,15 @@ export function registerSocketHandlers(io) {
       }
     })
 
+    socket.on('room:set-team', (payload = {}) => {
+      try {
+        const room = roomManager.setPlayerTeam(socket.id, payload.team)
+        broadcastRoomUpdate(io, room)
+      } catch (error) {
+        emitSocketError(socket, 'action:error', error.message)
+      }
+    })
+
     socket.on('match:can-start', () => {
       try {
         const { room } = roomManager.getPlayerContextOrThrow(socket.id)

@@ -1,0 +1,1187 @@
+/* ============================================================
+   X-O House UI Theme — tokens + component kit (pure DOM/CSS)
+   Source of truth: NewUIStyle/{tokens,components,layout}.md + style-guide.html
+   Cream "sticker" shapes on a red dotted field, dark-maroon ink with hard
+   maroon OFFSET shadows (zero blur), gold = the ONE action per screen.
+   RTL-native. NO animation / transitions, ever — pressed states are instant.
+   ============================================================ */
+
+:root {
+  /* ---------- palette (exact, from the brand assets) ---------- */
+  --bg-top: #ef5646;
+  --bg-bottom: #e02038;
+  --bg-dot: #40000d;
+  --cream: #f9f4f0;
+  --cream-2: #ece3d6;
+  --maroon: #40000d;
+  --maroon-2: #6e1322;
+  --red: #e5243b;
+  --red-deep: #b5172c;
+  --gold: #fdb446;
+  --gold-deep: #d88a1e;
+  --on-cream: var(--maroon);
+  --on-red: var(--cream);
+  --on-gold: var(--maroon);
+  --on-maroon: var(--cream);
+  /* status — kept inside the palette so nothing clashes */
+  --ok: #2fa36b;
+  --warn: var(--gold);
+  --danger: var(--red);
+
+  /* ---------- shape ---------- */
+  --radius-sm: 12px;
+  --radius: 18px;
+  --radius-lg: 26px;
+  --radius-pill: 999px;
+  --stroke-w: 3px;
+
+  /* ---------- depth (hard offset, no blur) ---------- */
+  --lift: 6px;
+  --shadow-hard: 0 var(--lift) 0 var(--maroon);
+
+  /* ---------- space (8-based) ---------- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* ---------- type ---------- */
+  --font-display: "Lalezar", "Baloo Bhaijaan 2", system-ui, sans-serif;
+  --font-body: "Cairo", "Tajawal", system-ui, sans-serif;
+  --fs-hero: clamp(2.5rem, 11vw, 4.5rem);
+  --fs-title: clamp(1.6rem, 6vw, 2.4rem);
+  --fs-lead: clamp(1.15rem, 4.5vw, 1.4rem);
+  --fs-body: 1rem;
+  --fs-meta: 0.8125rem;
+}
+
+/* ============================================================
+   reset / app-like shell
+   ============================================================ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  font-family: var(--font-body);
+  color: var(--cream);
+  background: var(--bg-bottom);
+}
+.selectable {
+  user-select: text;
+}
+img {
+  display: block;
+}
+button {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+
+/* the red dotted field — fixed behind everything; centers the screen column */
+#app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  background-color: var(--bg-bottom);
+  background-image:
+    radial-gradient(var(--bg-dot) 1.6px, transparent 1.8px),
+    radial-gradient(var(--bg-dot) 1.6px, transparent 1.8px),
+    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+  background-size: 104px 96px, 104px 96px, 100% 100%;
+  background-position: 0 0, 52px 48px, 0 0;
+  background-repeat: repeat, repeat, no-repeat;
+}
+
+/* phone-width screen column */
+.screen {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding:
+    calc(env(safe-area-inset-top) + var(--s-4))
+    calc(env(safe-area-inset-right) + var(--s-5))
+    calc(env(safe-area-inset-bottom) + var(--s-4))
+    calc(env(safe-area-inset-left) + var(--s-5));
+}
+.screen__top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 48px;
+}
+.screen__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--s-5);
+  min-height: 0;
+}
+.screen__action {
+  margin-top: auto;
+  padding-top: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.scroll-region {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+}
+.center {
+  align-items: center;
+  text-align: center;
+}
+
+/* ============================================================
+   sticker base + utilities
+   ============================================================ */
+.sticker {
+  background: var(--cream);
+  color: var(--on-cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard);
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.row--between {
+  justify-content: space-between;
+}
+.spacer {
+  flex: 1;
+}
+.muted {
+  color: var(--maroon-2);
+}
+.hidden {
+  display: none !important;
+}
+.on-red-title {
+  color: var(--cream);
+  text-shadow: 0 2px 0 var(--maroon);
+}
+
+/* ============================================================
+   buttons — one construction, fill sets the role
+   ============================================================ */
+.btn {
+  font-family: var(--font-display);
+  font-size: var(--fs-lead);
+  line-height: 1;
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  padding: var(--s-4) var(--s-5);
+  min-height: 56px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+}
+.btn--primary {
+  background: var(--gold);
+  color: var(--on-gold);
+  box-shadow: 0 var(--lift) 0 var(--gold-deep);
+}
+.btn--secondary {
+  background: var(--cream);
+  color: var(--on-cream);
+  box-shadow: var(--shadow-hard);
+}
+.btn--danger {
+  background: var(--maroon);
+  color: var(--on-maroon);
+  box-shadow: 0 var(--lift) 0 #1d0006;
+}
+.btn--ghost {
+  background: transparent;
+  color: var(--maroon);
+  box-shadow: none;
+  border-color: transparent;
+}
+.btn--block {
+  width: 100%;
+}
+.btn--pill {
+  border-radius: var(--radius-pill);
+  padding-inline: var(--s-6);
+}
+.btn--sm {
+  min-height: 44px;
+  padding: var(--s-2) var(--s-4);
+  font-size: var(--fs-body);
+}
+.btn:active {
+  transform: translateY(var(--lift));
+  box-shadow: none;
+}
+.btn--ghost:active {
+  transform: none;
+  background: var(--cream-2);
+}
+.btn:focus-visible {
+  outline: var(--stroke-w) solid var(--maroon);
+  outline-offset: 3px;
+}
+/* disabled = flat, inset, muted — solid so it never bleeds the red field through */
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  pointer-events: none;
+  background: var(--cream-2);
+  color: color-mix(in srgb, var(--maroon) 42%, var(--cream-2));
+  border-color: color-mix(in srgb, var(--maroon) 32%, transparent);
+  box-shadow: none;
+}
+
+/* ============================================================
+   card / panel
+   ============================================================ */
+.card {
+  background: var(--cream);
+  color: var(--on-cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard);
+  padding: var(--s-5);
+}
+.card--lg {
+  border-radius: var(--radius-lg);
+}
+.card__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  color: var(--maroon);
+  margin: 0 0 var(--s-3);
+}
+.card__text {
+  font-family: var(--font-body);
+  color: var(--maroon-2);
+  margin: 0;
+}
+
+/* ============================================================
+   list / menu
+   ============================================================ */
+.list {
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard);
+  overflow: hidden;
+}
+.list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+  font-family: var(--font-body);
+  font-weight: 700;
+  color: var(--maroon);
+  border-bottom: 2px solid color-mix(in srgb, var(--maroon) 14%, transparent);
+}
+.list__row:last-child {
+  border-bottom: none;
+}
+.list__row--tap {
+  cursor: pointer;
+}
+.list__row--tap:active {
+  background: var(--cream-2);
+}
+.list__row .chev {
+  margin-inline-start: auto;
+  color: var(--maroon-2);
+}
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.menu__item {
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard);
+  padding: var(--s-4) var(--s-5);
+  font-family: var(--font-display);
+  font-size: var(--fs-lead);
+  color: var(--maroon);
+  cursor: pointer;
+}
+.menu__item:active {
+  transform: translateY(var(--lift));
+  box-shadow: none;
+}
+
+/* ============================================================
+   inputs
+   ============================================================ */
+.field {
+  width: 100%;
+  min-height: 56px;
+  background: var(--cream);
+  color: var(--maroon);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  padding: var(--s-4) var(--s-5);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  font-weight: 700;
+  box-shadow: var(--shadow-hard);
+}
+.field::placeholder {
+  color: color-mix(in srgb, var(--maroon) 45%, transparent);
+}
+.field:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.field--display {
+  font-family: var(--font-display);
+  font-size: var(--fs-lead);
+  text-align: center;
+}
+.code {
+  display: flex;
+  gap: var(--s-3);
+  justify-content: center;
+  direction: ltr;
+}
+.code__box {
+  width: 54px;
+  height: 66px;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  color: var(--maroon);
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-hard);
+  text-transform: uppercase;
+}
+.code__box:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+.label {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-meta);
+  color: var(--maroon-2);
+  margin: 0 0 var(--s-2);
+  text-align: start;
+}
+
+/* ============================================================
+   toggle + segmented control
+   ============================================================ */
+.switch {
+  width: 60px;
+  height: 34px;
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-pill);
+  background: var(--cream-2);
+  position: relative;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.switch__knob {
+  position: absolute;
+  top: 2px;
+  inset-inline-start: 2px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--maroon);
+}
+.switch[aria-checked="true"] {
+  background: var(--gold);
+}
+.switch[aria-checked="true"] .switch__knob {
+  inset-inline-start: auto;
+  inset-inline-end: 2px;
+}
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--cream-2);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-pill);
+}
+.segmented__tab {
+  flex: 1;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  color: var(--maroon-2);
+  cursor: pointer;
+  user-select: none;
+}
+.segmented__tab[aria-selected="true"] {
+  background: var(--cream);
+  color: var(--maroon);
+  box-shadow: var(--shadow-hard);
+}
+
+/* ============================================================
+   badges + player chips
+   ============================================================ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-family: var(--font-display);
+  font-size: var(--fs-meta);
+  border: 2px solid var(--maroon);
+  border-radius: var(--radius-pill);
+  background: var(--gold);
+  color: var(--maroon);
+}
+.badge--cream {
+  background: var(--cream);
+}
+.badge--x {
+  background: var(--red);
+  color: var(--cream);
+}
+.badge--o {
+  background: var(--gold);
+  color: var(--maroon);
+}
+.badge--ok {
+  background: var(--ok);
+  color: var(--cream);
+}
+.players {
+  display: flex;
+  gap: var(--s-5);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.player__avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  box-shadow: var(--shadow-hard);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  color: var(--maroon);
+}
+.player__avatar--x {
+  color: var(--red);
+}
+.player__avatar--o {
+  color: var(--gold-deep);
+}
+.player.is-turn .player__avatar {
+  border-color: var(--gold);
+}
+.player__name {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-meta);
+  color: var(--maroon);
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   dialog / scrim (appears instantly — no entrance animation)
+   ============================================================ */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--maroon) 55%, transparent);
+  display: grid;
+  place-items: center;
+  padding: var(--s-5);
+  z-index: 50;
+}
+.dialog {
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-hard);
+  padding: var(--s-6);
+  text-align: center;
+  width: min(92%, 420px);
+}
+.dialog h3 {
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  color: var(--maroon);
+  margin: 0 0 var(--s-2);
+}
+.dialog p {
+  font-family: var(--font-body);
+  color: var(--maroon-2);
+  margin: 0 0 var(--s-5);
+}
+
+/* ============================================================
+   header / top bar (sits on the red field)
+   ============================================================ */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+}
+.topbar__logo {
+  height: 64px;
+  width: auto;
+}
+.topbar__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  color: var(--cream);
+  text-shadow: 0 2px 0 var(--maroon);
+  margin: 0;
+  line-height: 1;
+  /* subtle black outline so the title reads on the red field */
+  -webkit-text-stroke: 1px var(--maroon);
+  paint-order: stroke fill;
+}
+
+/* ============================================================
+   brand splash (home screen)
+   ============================================================ */
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-4);
+}
+.brand__logo {
+  width: min(58vw, 240px);
+  height: auto;
+  /* Frame the brand badge as an intentional cream sticker (logo itself unaltered). */
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-hard);
+}
+.brand__tagline {
+  font-family: var(--font-body);
+  font-weight: 700;
+  color: var(--cream);
+  opacity: 0.92;
+  margin: 0;
+  text-align: center;
+  text-shadow: 0 1px 0 var(--maroon);
+}
+
+/* ============================================================
+   game board (the X-O surface)
+   ============================================================ */
+.board {
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-hard);
+  padding: var(--s-3);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-3);
+  width: min(86%, 360px);
+  aspect-ratio: 1;
+  margin-inline: auto;
+}
+.cell {
+  background: var(--cream-2);
+  border: 2px solid var(--maroon);
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 12vw, 3.4rem);
+  cursor: pointer;
+  position: relative;
+  color: var(--maroon);
+}
+.cell:active {
+  background: var(--cream);
+}
+.cell.is-x {
+  color: var(--red);
+}
+.cell.is-o {
+  color: var(--gold-deep);
+}
+.cell.is-win {
+  background: var(--gold);
+  color: var(--maroon);
+}
+/* targetable cell while an ability is armed — outline in gold, no motion */
+.cell.is-target {
+  border-color: var(--gold);
+  background: var(--cream);
+}
+.cell[aria-disabled="true"] {
+  cursor: default;
+}
+/* small corner markers on a cell (shield / trap) */
+.cell__mark {
+  position: absolute;
+  inset-block-start: 6px;
+  inset-inline-end: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--maroon);
+}
+.cell__mark--shield {
+  background: var(--ok);
+}
+
+/* ============================================================
+   lobby pieces
+   ============================================================ */
+.or-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-family: var(--font-display);
+  color: var(--maroon-2);
+}
+.or-divider::before,
+.or-divider::after {
+  content: "";
+  flex: 1;
+  height: 2px;
+  background: color-mix(in srgb, var(--maroon) 18%, transparent);
+}
+.code-display {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 9vw, 2.6rem);
+  letter-spacing: 0.22em;
+  color: var(--maroon);
+  direction: ltr;
+  line-height: 1.1;
+}
+.teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3);
+}
+.roster {
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard);
+  overflow: hidden;
+}
+.roster__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  background: var(--cream-2);
+  border-bottom: 2px solid color-mix(in srgb, var(--maroon) 16%, transparent);
+}
+.roster__mark {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--maroon);
+  font-family: var(--font-display);
+  font-size: 1rem;
+  line-height: 1;
+}
+.roster__mark--x {
+  background: var(--red);
+  color: var(--cream);
+}
+.roster__mark--o {
+  background: var(--gold);
+  color: var(--maroon);
+}
+.roster__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  color: var(--maroon);
+}
+.roster__count {
+  margin-inline-start: auto;
+  font-family: var(--font-display);
+  color: var(--maroon-2);
+}
+.roster__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 2px solid color-mix(in srgb, var(--maroon) 10%, transparent);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-meta);
+  color: var(--maroon);
+}
+.roster__row:last-child {
+  border-bottom: none;
+}
+.roster__row--empty {
+  color: var(--maroon-2);
+  font-weight: 400;
+  justify-content: center;
+}
+.roster__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roster__badges {
+  margin-inline-start: auto;
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.roster__badges .badge {
+  font-size: 0.6875rem;
+  padding: 2px 8px;
+}
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.stepper__value {
+  font-family: var(--font-display);
+  font-size: var(--fs-lead);
+  color: var(--maroon);
+  min-width: 2ch;
+  text-align: center;
+}
+.roomhint {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-meta);
+  color: var(--cream);
+  text-align: center;
+  margin: 0;
+  text-shadow: 0 1px 0 var(--maroon);
+}
+
+/* ============================================================
+   desktop room layout (>=900px): flank the centered controls
+   with the team rosters — O on the left, X on the right.
+   Mobile/tablet (<900px) is untouched: rosters stay side-by-side
+   inside the centered column exactly as before.
+   ============================================================ */
+@media (min-width: 900px) {
+  .screen--room {
+    max-width: 1060px;
+  }
+
+  .screen--room .scroll-region {
+    display: grid;
+    align-content: start;
+    grid-template-columns: 1fr minmax(0, 460px) 1fr;
+    grid-template-areas:
+      "rx code ro"
+      "rx join ro"
+      "rx set  ro";
+    overflow: visible;
+  }
+
+  /* let the two rosters become grid items of the region */
+  .screen--room .teams {
+    display: contents;
+  }
+  .screen--room .roster--x {
+    grid-area: rx;
+    align-self: start;
+  }
+  .screen--room .roster--o {
+    grid-area: ro;
+    align-self: start;
+  }
+
+  /* center column: room code, team-join row, host settings */
+  .screen--room .scroll-region > .card.center {
+    grid-area: code;
+  }
+  .screen--room .scroll-region > .row {
+    grid-area: join;
+  }
+  .screen--room .scroll-region > .card:not(.center) {
+    grid-area: set;
+  }
+
+  /* keep the gold start / ready action centered under the middle column */
+  .screen--room .screen__action {
+    width: 100%;
+    max-width: 460px;
+    margin-inline: auto;
+  }
+}
+
+/* ============================================================
+   in-game: scoreboard / turn / ability bar / question / match end
+   ============================================================ */
+.gamebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.scoreboard {
+  display: flex;
+  align-items: stretch;
+  gap: var(--s-2);
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard);
+  padding: var(--s-3);
+}
+.score-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--s-2);
+  border-radius: var(--radius-sm);
+  border: 2px solid transparent;
+}
+.score-col.is-active {
+  background: var(--cream-2);
+  border-color: var(--gold);
+}
+.score-col__mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--maroon);
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.score-col__mark--x {
+  background: var(--red);
+  color: var(--cream);
+}
+.score-col__mark--o {
+  background: var(--gold);
+  color: var(--maroon);
+}
+.score-col__score {
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  color: var(--maroon);
+  line-height: 1;
+}
+.score-mid {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-inline: var(--s-2);
+  gap: 2px;
+}
+.score-mid__stage {
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  color: var(--maroon);
+  white-space: nowrap;
+}
+.score-mid__label {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.6875rem;
+  color: var(--maroon-2);
+}
+.turnline {
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  text-align: center;
+  color: var(--cream);
+  text-shadow: 0 2px 0 var(--maroon);
+  margin: 0;
+}
+
+/* ability bar */
+.abilitybar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s-2);
+}
+.ability {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 66px;
+  padding: var(--s-2) 2px;
+  cursor: pointer;
+  background: var(--cream);
+  color: var(--maroon);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-hard);
+  position: relative;
+  user-select: none;
+}
+.ability__name {
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  line-height: 1;
+}
+.ability__count {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.625rem;
+  color: var(--maroon-2);
+}
+.ability:active {
+  transform: translateY(var(--lift));
+  box-shadow: none;
+}
+.ability.is-armed {
+  background: var(--gold);
+  box-shadow: 0 var(--lift) 0 var(--gold-deep);
+}
+.ability.is-armed .ability__count {
+  color: var(--maroon);
+}
+.ability.is-used,
+.ability.is-disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+  background: var(--cream-2);
+  color: color-mix(in srgb, var(--maroon) 42%, var(--cream-2));
+  border-color: color-mix(in srgb, var(--maroon) 30%, transparent);
+  box-shadow: none;
+}
+.ability.is-used .ability__count {
+  color: color-mix(in srgb, var(--maroon) 42%, var(--cream-2));
+}
+.ability__x {
+  position: absolute;
+  inset-block-start: -8px;
+  inset-inline-end: -8px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--maroon);
+  color: var(--cream);
+  border: 2px solid var(--cream);
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+/* question dialog */
+.qhead {
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  color: var(--maroon-2);
+  margin: 0 0 var(--s-2);
+}
+.qtimer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  padding: 4px 14px;
+  margin: 0 auto var(--s-4);
+  font-family: var(--font-display);
+  font-size: var(--fs-lead);
+  color: var(--maroon);
+  background: var(--cream-2);
+  border: 2px solid var(--maroon);
+  border-radius: var(--radius-pill);
+}
+.qtimer.is-warn {
+  background: var(--red);
+  color: var(--cream);
+  border-color: var(--maroon);
+}
+.qprompt {
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  color: var(--maroon);
+  margin: 0 0 var(--s-5);
+  line-height: 1.25;
+}
+.qoptions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.qoption {
+  width: 100%;
+  min-height: 54px;
+  padding: var(--s-3) var(--s-4);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-body);
+  text-align: start;
+  color: var(--maroon);
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard);
+  cursor: pointer;
+}
+.qoption:active {
+  transform: translateY(var(--lift));
+  box-shadow: none;
+}
+.qoption.is-selected {
+  background: var(--gold);
+  box-shadow: 0 var(--lift) 0 var(--gold-deep);
+}
+.qoption.is-correct {
+  background: var(--ok);
+  color: var(--cream);
+  box-shadow: 0 var(--lift) 0 #1c6b45;
+}
+.qoption.is-wrong {
+  background: var(--red);
+  color: var(--cream);
+  box-shadow: 0 var(--lift) 0 var(--red-deep);
+}
+.qoption.is-dim {
+  background: var(--cream-2);
+  color: color-mix(in srgb, var(--maroon) 45%, var(--cream-2));
+  box-shadow: none;
+  pointer-events: none;
+}
+
+/* match end + stage result */
+.matchend__mark {
+  width: 96px;
+  height: 96px;
+  margin: 0 auto var(--s-4);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: var(--stroke-w) solid var(--maroon);
+  box-shadow: var(--shadow-hard);
+  font-family: var(--font-display);
+  font-size: 3.4rem;
+  line-height: 1;
+}
+.matchend__mark--x {
+  background: var(--red);
+  color: var(--cream);
+}
+.matchend__mark--o {
+  background: var(--gold);
+  color: var(--maroon);
+}
+.matchend__mark--draw {
+  background: var(--cream-2);
+  color: var(--maroon);
+  font-size: 2.2rem;
+}
+.matchend__score {
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  color: var(--maroon);
+  margin: 0 0 var(--s-5);
+  direction: ltr;
+}
+
+/* a brief stage-result banner (no motion — appears/leaves instantly) */
+.stage-result {
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  text-align: center;
+  color: var(--maroon);
+  background: var(--gold);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard);
+  padding: var(--s-3) var(--s-5);
+  margin-inline: auto;
+}
+
+/* ============================================================
+   toast / inline error (cream sticker, never bare on red)
+   ============================================================ */
+.toast {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: calc(env(safe-area-inset-bottom) + var(--s-5));
+  margin-inline: auto;
+  width: max-content;
+  max-width: min(92%, 420px);
+  background: var(--cream);
+  color: var(--maroon);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-hard);
+  padding: var(--s-3) var(--s-5);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-body);
+  text-align: center;
+  z-index: 60;
+}
+.toast--error {
+  background: var(--maroon);
+  color: var(--cream);
+}

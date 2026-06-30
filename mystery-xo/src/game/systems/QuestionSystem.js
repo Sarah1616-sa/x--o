@@ -6,19 +6,28 @@ export class QuestionSystem {
     this.questionOpen = false
     this.activeQuestion = null
     this.questionTimeRemaining = questionTimeLimit
-    this.teamAnswers = this.createTeamAnswerState()
+    this.selectedAnswerIndex = null
+    this.answererTurn = this.createAnswererState()
+    this.activeAnswererTeam = null
+    this.activeAnswererNumber = 1
   }
 
-  createTeamAnswerState() {
+  createAnswererState() {
     return {
-      captain: null,
-      partner: null,
+      X: 0,
+      O: 0,
     }
   }
 
-  resetTeamAnswers() {
-    this.teamAnswers = this.createTeamAnswerState()
-    return this.teamAnswers
+  resetAnswer() {
+    this.selectedAnswerIndex = null
+    return this.selectedAnswerIndex
+  }
+
+  resetAnswererRotation() {
+    this.answererTurn = this.createAnswererState()
+    this.activeAnswererTeam = null
+    this.activeAnswererNumber = 1
   }
 
   resetQuestionIndex() {
@@ -31,44 +40,53 @@ export class QuestionSystem {
     return question
   }
 
-  openQuestion(question) {
-    this.questionOpen = true
-    this.activeQuestion = question
-    this.resetTeamAnswers()
-    this.questionTimeRemaining = this.questionTimeLimit
+  // Advances the rotating answerer for the team whose turn it is, so a different
+  // teammate is the lone answerer each time that team is asked a question.
+  rotateAnswerer(team, teamSize = 1) {
+    const safeSize = Math.max(1, teamSize)
+    const nextIndex = this.answererTurn[team] % safeSize
+    this.answererTurn[team] = nextIndex + 1
+    this.activeAnswererTeam = team
+    this.activeAnswererNumber = nextIndex + 1
+    return this.activeAnswererNumber
   }
 
-  setTeamAnswer(role, answerIndex) {
+  openQuestion(question, { team = null, teamSize = 1 } = {}) {
+    this.questionOpen = true
+    this.activeQuestion = question
+    this.resetAnswer()
+    this.questionTimeRemaining = this.questionTimeLimit
+
+    if (team) {
+      this.rotateAnswerer(team, teamSize)
+    }
+  }
+
+  setAnswer(answerIndex) {
     if (!this.questionOpen) {
       return false
     }
 
-    this.teamAnswers[role] = answerIndex
+    this.selectedAnswerIndex = answerIndex
     return true
   }
 
-  getSelectedChoice(role) {
-    const answerIndex = this.teamAnswers[role]
-
-    if (answerIndex === null || !this.activeQuestion) {
+  getSelectedChoice() {
+    if (this.selectedAnswerIndex === null || !this.activeQuestion) {
       return null
     }
 
-    return this.activeQuestion.options[answerIndex]
+    return this.activeQuestion.options[this.selectedAnswerIndex]
   }
 
-  hasBothTeamAnswers() {
-    return this.teamAnswers.captain !== null && this.teamAnswers.partner !== null
+  hasAnswer() {
+    return this.selectedAnswerIndex !== null
   }
 
-  areTeamAnswersCorrect() {
+  isAnswerCorrect() {
     const correctAnswerIndex = this.activeQuestion?.correctAnswerIndex
 
-    return (
-      this.hasBothTeamAnswers() &&
-      this.teamAnswers.captain === this.teamAnswers.partner &&
-      this.teamAnswers.captain === correctAnswerIndex
-    )
+    return this.hasAnswer() && this.selectedAnswerIndex === correctAnswerIndex
   }
 
   tickTimer() {
@@ -92,7 +110,7 @@ export class QuestionSystem {
   closeQuestion() {
     this.questionOpen = false
     this.activeQuestion = null
-    this.resetTeamAnswers()
+    this.resetAnswer()
     this.questionTimeRemaining = this.questionTimeLimit
   }
 }

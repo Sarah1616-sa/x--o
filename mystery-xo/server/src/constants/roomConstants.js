@@ -14,10 +14,13 @@ export const PLAYER_ROLES = {
   MEMBER: 'MEMBER',
 }
 
-export const ALLOWED_MAX_PLAYERS = [2, 4, 6, 8]
+// Any count is allowed within these bounds — no even-number / balanced-team rule.
+export const MIN_ROOM_PLAYERS = 2
+export const MAX_ROOM_PLAYERS = 20
 export const DEFAULT_TIMER_DURATION = 15
 export const DEFAULT_STAGE_COUNT = 5
 export const DEFAULT_QUESTION_CATEGORY = null
+export const DEFAULT_TEAM_COLORS = { X: '#ff3355', O: '#7dd3fc' }
 
 export const DEFAULT_SERVER_PORT = Number(process.env.PORT ?? 3001)
 
