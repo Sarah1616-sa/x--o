@@ -1,8 +1,16 @@
 export class QuestionSystem {
-  constructor({ questionBank, questionTimeLimit }) {
+  // questionBank: flat fallback pool (union of the match's categories).
+  // categoryBank: { [categoryId]: question[] } so a question can be drawn from
+  //   the active answerer's OWN categories. Optional — falls back to questionBank.
+  constructor({ questionBank, categoryBank = {}, questionTimeLimit }) {
     this.questionBank = questionBank
+    this.categoryBank = categoryBank
     this.questionTimeLimit = questionTimeLimit
-    this.questionIndex = 0
+    // Per-source shuffle bags (draw without replacement; reshuffle when empty) so
+    // questions are randomized AND non-repeating until a source cycles. Keyed by
+    // category id, plus a special '*' bag over the flat fallback pool.
+    this.bags = {}
+    this.lastQuestionId = null
     this.questionOpen = false
     this.activeQuestion = null
     this.questionTimeRemaining = questionTimeLimit
@@ -30,14 +38,66 @@ export class QuestionSystem {
     this.activeAnswererNumber = 1
   }
 
-  resetQuestionIndex() {
-    this.questionIndex = 0
+  // Retained as a no-op: question order is now randomized (shuffle bags), so a
+  // per-stage index reset is meaningless. Kept so existing stage-reset callers
+  // don't break.
+  resetQuestionIndex() {}
+
+  // Fisher–Yates over a shallow copy — a fresh shuffled queue for a bag.
+  shuffle(list) {
+    const out = [...list]
+    for (let i = out.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[out[i], out[j]] = [out[j], out[i]]
+    }
+    return out
   }
 
-  getNextQuestion() {
-    const question = this.questionBank[this.questionIndex % this.questionBank.length]
-    this.questionIndex += 1
+  // Draw the next question from a shuffle bag identified by `key`, over `pool`.
+  // Reshuffles when the bag empties; avoids repeating the immediately previous
+  // question id when the pool is large enough to allow it.
+  drawFromBag(key, pool) {
+    if (!pool || pool.length === 0) return null
+    let bag = this.bags[key]
+    if (!bag || bag.length === 0) bag = this.bags[key] = this.shuffle(pool)
+    let question = bag.pop()
+    // Dodge an immediate back-to-back repeat when possible.
+    if (question && question.id === this.lastQuestionId && bag.length > 0) {
+      const swap = bag.pop()
+      bag.push(question)
+      question = swap
+    }
+    this.lastQuestionId = question?.id ?? null
     return question
+  }
+
+  // Pick a question tied to the acting answerer's categories:
+  //   1. keep only ids that have questions in the category bank; pick ONE at random
+  //      (so a player with several categories gets a random one each turn),
+  //   2. fall back to the team's combined categories, then to the flat pool.
+  getQuestionForCategories(categoryIds = [], fallbackIds = []) {
+    const valid = this.validCategoryIds(categoryIds)
+    if (valid.length) {
+      const pick = valid[Math.floor(Math.random() * valid.length)]
+      return this.drawFromBag(pick, this.categoryBank[pick])
+    }
+    const teamValid = this.validCategoryIds(fallbackIds)
+    if (teamValid.length) {
+      const pick = teamValid[Math.floor(Math.random() * teamValid.length)]
+      return this.drawFromBag(pick, this.categoryBank[pick])
+    }
+    return this.getNextQuestion()
+  }
+
+  validCategoryIds(ids) {
+    if (!Array.isArray(ids)) return []
+    return [...new Set(ids)].filter((id) => this.categoryBank[id]?.length)
+  }
+
+  // Neutral random draw from the flat fallback pool. Used by the collision
+  // contest, where both teams race one shared question (no single answerer).
+  getNextQuestion() {
+    return this.drawFromBag('*', this.questionBank)
   }
 
   // Advances the rotating answerer for the team whose turn it is, so a different

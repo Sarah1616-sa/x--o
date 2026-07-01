@@ -8,7 +8,7 @@
    Reuses the client's pure logic (no rule duplication / drift):
    imported from ../../../src/game/... — pure ES modules, no deps.
    ============================================================ */
-import { QUESTION_BANK } from '../../../src/game/data/questions.js'
+import { QUESTION_BANK, CATEGORIES } from '../../../src/game/data/questions.js'
 import {
   MAX_STAGES,
   QUESTION_TIME_LIMIT,
@@ -41,7 +41,10 @@ function emptyBoard() {
 export class GameEngine {
   // emit(): broadcast the current snapshot to the room (wired by socket.js).
   constructor({ maxStages = MAX_STAGES, teamSizes = { X: 1, O: 1 }, teamRosters = { X: [], O: [] }, questionBank = QUESTION_BANK, emit = () => {} } = {}) {
-    this.questionSystem = new QuestionSystem({ questionBank, questionTimeLimit: QUESTION_TIME_LIMIT })
+    // Per-category pools let a question be drawn from the active answerer's OWN
+    // categories; questionBank stays the flat fallback (union of the match's cats).
+    const categoryBank = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.questions]))
+    this.questionSystem = new QuestionSystem({ questionBank, categoryBank, questionTimeLimit: QUESTION_TIME_LIMIT })
     this.matchSystem = new MatchSystem({ maxStages })
     this.abilitySystem = new AbilitySystem()
     this.turnResolver = new TurnResolver({
@@ -50,7 +53,9 @@ export class GameEngine {
       winningLines: WINNING_LINES,
     })
     this.teamSizes = teamSizes
-    this.teamRosters = teamRosters // { X: [names], O: [names] } — for the answerer label
+    // { X: [{name, categories}], O: [...] } in turn order — drives the answerer
+    // label AND per-answerer question categories. (String entries tolerated.)
+    this.teamRosters = teamRosters
     this.emit = emit
 
     this.board = emptyBoard()
@@ -239,11 +244,17 @@ export class GameEngine {
 
   /* -------------------- question flow -------------------- */
   openQuestion() {
-    const question = this.questionSystem.getNextQuestion()
-    this.questionSystem.openQuestion(question, {
-      team: this.currentTurnTeam,
-      teamSize: this.teamSizes[this.currentTurnTeam] || 1,
-    })
+    const team = this.currentTurnTeam
+    const teamSize = this.teamSizes[team] || 1
+    // Pick the answerer FIRST so the question can be drawn from THEIR categories
+    // (random among them). Fall back to the team's combined cats, then the pool.
+    this.questionSystem.rotateAnswerer(team, teamSize)
+    const answerer = this.currentAnswererEntry()
+    const question = this.questionSystem.getQuestionForCategories(
+      this.rosterCategories(answerer),
+      this.teamCategories(team),
+    )
+    this.questionSystem.openQuestion(question) // rotation already applied above
     this.phase = 'QUESTION_OPEN'
     this.reveal = null
     this.questionSeq += 1
@@ -541,6 +552,8 @@ export class GameEngine {
       phase: this.phase,
       board: this.flatBoard(),
       currentTurnTeam: this.currentTurnTeam,
+      // Who is up right now (per-player), for the turn-indicator illustration.
+      turnActor: this.turnActor(),
       currentStage: this.matchSystem.currentStage,
       maxStages: this.matchSystem.maxStages,
       stageScores: { ...this.matchSystem.stageScores },
@@ -611,10 +624,54 @@ export class GameEngine {
     return null
   }
 
-  answererName() {
+  // Roster entries are normally { name, categories }; tolerate bare-string
+  // entries (older callers / tests) so name/category lookups never throw.
+  rosterName(entry) {
+    return typeof entry === 'string' ? entry : (entry?.name ?? null)
+  }
+  rosterCategories(entry) {
+    return typeof entry === 'string' ? [] : (entry?.categories ?? [])
+  }
+
+  // The roster entry for the CURRENT active answerer (whoever the rotation landed on).
+  currentAnswererEntry() {
     const roster = this.teamRosters[this.currentTurnTeam] || []
     if (!roster.length) return null
     const idx = (this.questionSystem.activeAnswererNumber - 1) % roster.length
     return roster[idx] ?? null
+  }
+
+  answererName() {
+    return this.rosterName(this.currentAnswererEntry())
+  }
+
+  // Union of every category picked by the given team's players — the fallback
+  // when the active answerer picked no categories of their own.
+  teamCategories(team) {
+    const ids = new Set()
+    for (const entry of this.teamRosters[team] || []) {
+      for (const id of this.rosterCategories(entry)) ids.add(id)
+    }
+    return [...ids]
+  }
+
+  // Who is "up" right now, for the on-screen turn indicator. During QUESTION_OPEN
+  // it's the active answerer; during TURN_IDLE we PEEK the upcoming answerer
+  // without advancing the rotation so players see who's next before clicking.
+  // Null in phases with no single actor (collision, stage/match end).
+  turnActor() {
+    const team = this.currentTurnTeam
+    const roster = this.teamRosters[team] || []
+    const teamSize = Math.max(1, this.teamSizes[team] || 1)
+    let number
+    if (this.phase === 'QUESTION_OPEN') {
+      number = this.questionSystem.activeAnswererNumber
+    } else if (this.phase === 'TURN_IDLE') {
+      number = (this.questionSystem.answererTurn[team] % teamSize) + 1
+    } else {
+      return null
+    }
+    const name = roster.length ? this.rosterName(roster[(number - 1) % roster.length]) : null
+    return { team, number, name }
   }
 }

@@ -9,6 +9,7 @@
 import { h, button, topbar, logo, toast } from '../dom.js'
 import { socketService } from '../../network/socketService.js'
 import { InfoBar } from '../game/InfoBar.js'
+import { TurnIndicator } from '../game/TurnIndicator.js'
 import { Board } from '../game/Board.js'
 import { AbilityBar } from '../game/AbilityBar.js'
 import { QuestionDialog } from '../game/QuestionDialog.js'
@@ -38,6 +39,7 @@ export function GameScreen(nav, { room } = {}) {
 
   // ---- components (dumb renderers; click handlers send intents) ----
   const infoBar = InfoBar()
+  const turnIndicator = TurnIndicator()
   const board = Board((i) => onCell(i))
   const abilityBar = AbilityBar((key) => onAbility(key))
 
@@ -52,6 +54,7 @@ export function GameScreen(nav, { room } = {}) {
     ),
     h('div', { class: 'screen__body', style: { justifyContent: 'space-between', gap: 'var(--s-4)' } },
       infoBar.el,
+      turnIndicator.el,
       h('div', { style: { flex: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '0', width: '100%' } }, board.el),
       abilityBar.el,
     ),
@@ -85,6 +88,9 @@ export function GameScreen(nav, { room } = {}) {
       stageScores: g.stageScores,
       banner: turnText,
     })
+
+    // Per-player "whose turn now" illustration (null in phases with no single actor).
+    turnIndicator.update({ actor: g.turnActor, viewerTeam: mine })
 
     board.render({
       board: flatToMatrix(g.board || []),
