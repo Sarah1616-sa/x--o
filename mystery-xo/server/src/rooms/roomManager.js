@@ -298,7 +298,7 @@ export class RoomManager {
       room.teams[team].playerIds
         .map((id) => room.players[id])
         .filter(Boolean)
-        .map((p) => ({ name: p.name, categories: [...p.selectedCategories] }))
+        .map((p) => ({ playerId: p.playerId, name: p.name, categories: [...p.selectedCategories] }))
     const rosters = { X: rosterFor('X'), O: rosterFor('O') }
 
     // The question pool is the union of every player's selected categories (falls

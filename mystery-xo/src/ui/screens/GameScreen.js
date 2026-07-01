@@ -61,8 +61,19 @@ export function GameScreen(nav, { room } = {}) {
   )
 
   /* -------------------- intents (server is authoritative + re-validates) -------------------- */
+  // Within a team, only the teammate whose turn it is may act. When the server
+  // names an active player, require it to be me; otherwise stay permissive.
+  function isMyActorTurn() {
+    const actor = game?.turnActor
+    return !actor?.playerId || actor.playerId === socketService.getSelfPlayerId?.()
+  }
   function myTurn() {
-    return Boolean(game) && game.phase === 'TURN_IDLE' && game.currentTurnTeam === myTeam()
+    return (
+      Boolean(game) &&
+      game.phase === 'TURN_IDLE' &&
+      game.currentTurnTeam === myTeam() &&
+      isMyActorTurn()
+    )
   }
   function onCell(i) {
     if (myTurn()) socketService.selectCell(i)
@@ -77,10 +88,9 @@ export function GameScreen(nav, { room } = {}) {
     game = g
 
     const mine = myTeam()
-    const turnText =
-      g.phase === 'MATCH_END'
-        ? ''
-        : g.banner ?? (g.currentTurnTeam === mine ? 'دورك' : `دور الفريق ${g.currentTurnTeam}`)
+    // Only real announcements (stage win / draw / collision) go on the InfoBar
+    // line now — the routine "whose turn" is shown by the TurnIndicator badge.
+    const turnText = g.phase === 'MATCH_END' ? '' : (g.banner ?? '')
     infoBar.update({
       currentPlayer: g.currentTurnTeam,
       currentStage: g.currentStage,
@@ -154,7 +164,9 @@ export function GameScreen(nav, { room } = {}) {
   // race); a normal question only if it's my team's turn to answer.
   function canAnswer(q) {
     if (!q || q.reveal) return false
-    return q.mode === 'collision' ? !!q.answerable : q.answeringTeam === myTeam()
+    // Collision is a two-team race; a normal question is only for the designated
+    // rotating answerer (turnActor.playerId), not just anyone on the team.
+    return q.mode === 'collision' ? !!q.answerable : q.answeringTeam === myTeam() && isMyActorTurn()
   }
 
   function syncQuestion(g) {

@@ -540,23 +540,45 @@ button {
   white-space: nowrap;
 }
 
-/* Turn indicator — the player-chip "whose turn now" illustration on the red
-   field. Same static sticker chip as .player; name reads cream here (on red). */
+/* Turn indicator — a compact "now playing" sticker badge on the red field.
+   Cream pill + maroon ink + hard shadow, with the team mark, a label, and the
+   acting player's name. Gold outline when it's the viewer's own turn. Static. */
 .turn-indicator {
+  align-self: center; /* center within the stretched screen__body column */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-4) var(--s-2) var(--s-5);
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-hard);
+}
+.turn-indicator.is-turn {
+  border-color: var(--gold);
+}
+/* Smaller avatar inside the pill; drop its own shadow so the pill's reads clean. */
+.turn-indicator .player__avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 1.35rem;
+  box-shadow: none;
+}
+.turn-indicator__text {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--s-2);
+  line-height: 1.15;
 }
 .turn-indicator__label {
-  margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
+  font-weight: 700;
   font-size: var(--fs-meta);
-  color: var(--cream);
-  text-shadow: 0 2px 0 var(--maroon);
+  color: var(--maroon-2);
 }
-.turn-indicator .player__name {
-  color: var(--cream);
+.turn-indicator__name {
+  font-family: var(--font-display);
+  font-size: var(--fs-lead);
+  color: var(--maroon);
 }
 
 /* ============================================================

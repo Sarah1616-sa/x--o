@@ -235,7 +235,7 @@ export function registerSocketHandlers(io) {
       try {
         const { room, player } = roomManager.getPlayerContextOrThrow(socket.id)
         if (!room.engine) throw new Error('Game has not started.')
-        room.engine.selectCell(player.team, Number(payload.cellIndex))
+        room.engine.selectCell(player.team, Number(payload.cellIndex), player.playerId)
       } catch (error) {
         emitSocketError(socket, 'action:error', error.message)
       }
@@ -245,7 +245,7 @@ export function registerSocketHandlers(io) {
       try {
         const { room, player } = roomManager.getPlayerContextOrThrow(socket.id)
         if (!room.engine) throw new Error('Game has not started.')
-        room.engine.activateAbility(player.team, payload.ability)
+        room.engine.activateAbility(player.team, payload.ability, player.playerId)
       } catch (error) {
         emitSocketError(socket, 'action:error', error.message)
       }
@@ -255,7 +255,7 @@ export function registerSocketHandlers(io) {
       try {
         const { room, player } = roomManager.getPlayerContextOrThrow(socket.id)
         if (!room.engine) throw new Error('Game has not started.')
-        room.engine.submitAnswer(player.team, Number(payload.answerIndex))
+        room.engine.submitAnswer(player.team, Number(payload.answerIndex), player.playerId)
       } catch (error) {
         emitSocketError(socket, 'action:error', error.message)
       }

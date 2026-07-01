@@ -109,9 +109,10 @@ export class GameEngine {
   }
 
   /* -------------------- intents (called by socket handlers) -------------------- */
-  selectCell(team, index) {
+  selectCell(team, index, playerId = null) {
     if (this.phase !== 'TURN_IDLE') return
     if (team !== this.currentTurnTeam) return
+    if (!this.isActivePlayer(playerId)) return // only the teammate whose turn it is
     if (!Number.isInteger(index) || index < 0 || index > 8) return
     this.applyTurnResult(
       this.turnResolver.handleCellClick({
@@ -125,9 +126,10 @@ export class GameEngine {
     )
   }
 
-  activateAbility(team, key) {
+  activateAbility(team, key, playerId = null) {
     if (this.phase !== 'TURN_IDLE') return
     if (team !== this.currentTurnTeam) return
+    if (!this.isActivePlayer(playerId)) return // only the teammate whose turn it is
     if (!ABILITY_KEYS.includes(key)) return
     const ctx = {
       board: this.board,
@@ -151,13 +153,15 @@ export class GameEngine {
     this.emit()
   }
 
-  submitAnswer(team, answerIndex) {
-    if (this.phase === 'QUESTION_OPEN') return this.submitNormalAnswer(team, answerIndex)
+  submitAnswer(team, answerIndex, playerId = null) {
+    if (this.phase === 'QUESTION_OPEN') return this.submitNormalAnswer(team, answerIndex, playerId)
+    // Collision is a two-team race — any eligible player may answer, so no per-player gate.
     if (this.phase === 'COLLISION_QUESTION') return this.submitCollisionAnswer(team, answerIndex)
   }
 
-  submitNormalAnswer(team, answerIndex) {
+  submitNormalAnswer(team, answerIndex, playerId = null) {
     if (team !== this.currentTurnTeam) return // only the answering team
+    if (!this.isActivePlayer(playerId)) return // only the designated rotating answerer
     if (this.reveal) return // already answered, in reveal window
     const options = this.questionSystem.activeQuestion?.options
     if (!options || !Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex >= options.length) return
@@ -652,23 +656,47 @@ export class GameEngine {
     return [...ids]
   }
 
-  // Who is "up" right now, for the on-screen turn indicator. During QUESTION_OPEN
-  // it's the active answerer; during TURN_IDLE we PEEK the upcoming answerer
-  // without advancing the rotation so players see who's next before clicking.
-  // Null in phases with no single actor (collision, stage/match end).
+  // The 1-based position of the player whose turn it is right now. During
+  // QUESTION_OPEN it's the locked answerer; during TURN_IDLE we PEEK the upcoming
+  // one (the same value the rotation will land on) so cell/ability actions are
+  // gated to that player BEFORE the question opens. Null in phases with no single
+  // actor (collision, stage/match end).
+  activeNumber() {
+    const team = this.currentTurnTeam
+    const teamSize = Math.max(1, this.teamSizes[team] || 1)
+    if (this.phase === 'QUESTION_OPEN') return this.questionSystem.activeAnswererNumber
+    if (this.phase === 'TURN_IDLE') return (this.questionSystem.answererTurn[team] % teamSize) + 1
+    return null
+  }
+
+  // The roster entry / playerId of the player whose turn it is right now.
+  activePlayerEntry() {
+    const roster = this.teamRosters[this.currentTurnTeam] || []
+    const number = this.activeNumber()
+    if (!roster.length || number == null) return null
+    return roster[(number - 1) % roster.length] ?? null
+  }
+  activePlayerId() {
+    const entry = this.activePlayerEntry()
+    return entry && typeof entry === 'object' ? (entry.playerId ?? null) : null
+  }
+
+  // True if `playerId` may act now. Only enforced when both the caller supplies a
+  // playerId AND we can resolve the active player's id (rosters with ids); older
+  // callers / id-less rosters (tests) stay permissive so nothing regresses.
+  isActivePlayer(playerId) {
+    const active = this.activePlayerId()
+    if (!active || playerId == null) return true
+    return playerId === active
+  }
+
+  // Who is "up" right now, for the on-screen turn indicator + client-side gating.
   turnActor() {
+    const number = this.activeNumber()
+    if (number == null) return null
     const team = this.currentTurnTeam
     const roster = this.teamRosters[team] || []
-    const teamSize = Math.max(1, this.teamSizes[team] || 1)
-    let number
-    if (this.phase === 'QUESTION_OPEN') {
-      number = this.questionSystem.activeAnswererNumber
-    } else if (this.phase === 'TURN_IDLE') {
-      number = (this.questionSystem.answererTurn[team] % teamSize) + 1
-    } else {
-      return null
-    }
-    const name = roster.length ? this.rosterName(roster[(number - 1) % roster.length]) : null
-    return { team, number, name }
+    const entry = roster.length ? roster[(number - 1) % roster.length] : null
+    return { team, number, name: this.rosterName(entry), playerId: this.activePlayerId() }
   }
 }
