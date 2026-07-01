@@ -148,6 +148,18 @@ export class AbilitySystem {
     this.trapSquares.delete(index)
   }
 
+  // A same-cell collision spends BOTH abilities involved (per-match limits stand).
+  // The defender's placed trap is removed here; for Case A the attacker's trap is
+  // spent too (it never became a placement). Case B: the attacker's power was already
+  // consumed at arm-time (activatePower), so only the trap needs clearing.
+  consumeCollision(index, { attacker, caseType }) {
+    this.trapSquares.delete(index)
+    if (caseType === 'A') {
+      this.trapRemaining[attacker] = 0
+    }
+    this.clearArmedAbilities()
+  }
+
   resolveTrapForPendingCell(index, currentPlayer) {
     const trapOwner = this.trapSquares.get(index)
 

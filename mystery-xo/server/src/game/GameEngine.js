@@ -9,7 +9,13 @@
    imported from ../../../src/game/... — pure ES modules, no deps.
    ============================================================ */
 import { QUESTION_BANK } from '../../../src/game/data/questions.js'
-import { MAX_STAGES, QUESTION_TIME_LIMIT } from '../../../src/game/constants/gameConstants.js'
+import {
+  MAX_STAGES,
+  QUESTION_TIME_LIMIT,
+  COLLISION_ANNOUNCE_SECONDS,
+  COLLISION_TEXT_A,
+  COLLISION_TEXT_B,
+} from '../../../src/game/constants/gameConstants.js'
 import { QuestionSystem } from '../../../src/game/systems/QuestionSystem.js'
 import { MatchSystem } from '../../../src/game/systems/MatchSystem.js'
 import { AbilitySystem } from '../../../src/game/systems/AbilitySystem.js'
@@ -23,6 +29,10 @@ const WINNING_LINES = [
 const REVEAL_MS = 900
 const STAGE_PAUSE_MS = 2200
 const ABILITY_KEYS = ['power', 'shield', 'steal', 'trap']
+// Announcement duration for a same-cell ability collision. Overridable (e.g. for tests)
+// via env; this is a server-only file so process.env is safe here.
+const COLLISION_ANNOUNCE_S = Number(process.env.COLLISION_ANNOUNCE_SECONDS) || COLLISION_ANNOUNCE_SECONDS
+const COLLISION_TEXT = { A: COLLISION_TEXT_A, B: COLLISION_TEXT_B }
 
 function emptyBoard() {
   return [[null, null, null], [null, null, null], [null, null, null]]
@@ -46,13 +56,17 @@ export class GameEngine {
     this.board = emptyBoard()
     this.currentTurnTeam = 'X'
     this.pendingCellIndex = null
-    this.phase = 'TURN_IDLE' // TURN_IDLE | QUESTION_OPEN | STAGE_END | MATCH_END
+    // TURN_IDLE | QUESTION_OPEN | COLLISION_ANNOUNCE | COLLISION_QUESTION | STAGE_END | MATCH_END
+    this.phase = 'TURN_IDLE'
     this.banner = null
     this.reveal = null // { selectedIndex, correctIndex } during the answer reveal
     this.matchWinner = null
     this.questionSeq = 0 // bumps each new question so the client can key its dialog
     this.timerId = null
     this.timeouts = new Set()
+    // Same-cell ability collision contest (null unless one is running). See startCollision().
+    this.collision = null
+    this.announceRemaining = 0
   }
 
   start() {
@@ -136,7 +150,11 @@ export class GameEngine {
   }
 
   submitAnswer(team, answerIndex) {
-    if (this.phase !== 'QUESTION_OPEN') return
+    if (this.phase === 'QUESTION_OPEN') return this.submitNormalAnswer(team, answerIndex)
+    if (this.phase === 'COLLISION_QUESTION') return this.submitCollisionAnswer(team, answerIndex)
+  }
+
+  submitNormalAnswer(team, answerIndex) {
     if (team !== this.currentTurnTeam) return // only the answering team
     if (this.reveal) return // already answered, in reveal window
     const options = this.questionSystem.activeQuestion?.options
@@ -185,6 +203,9 @@ export class GameEngine {
         // but keep the player's turn — they still answer a question and claim a cell.
         this.abilitySystem.consumeTrapPlacement(this.currentTurnTeam, result.cellIndex)
         this.emit()
+        return
+      case 'ABILITY_COLLISION':
+        this.startCollision(result)
         return
       case 'SWITCH_TURN':
         this.switchTurn()
@@ -288,6 +309,140 @@ export class GameEngine {
     }, REVEAL_MS)
   }
 
+  /* -------------------- same-cell ability collision -------------------- */
+  // Two abilities landed on one cell (فخ-vs-فخ = Case A, فخ-vs-باور = Case B). Both
+  // abilities are spent; we run a timed announcement, then open the SAME question for
+  // BOTH teams — first correct answer claims the cell, wrong locks that team out.
+  startCollision({ caseType, cellIndex, attacker }) {
+    this.abilitySystem.consumeCollision(cellIndex, { attacker, caseType })
+    this.collision = {
+      caseType,
+      cellIndex,
+      attacker,
+      text: COLLISION_TEXT[caseType],
+      answered: { X: false, O: false },
+      lockedOut: { X: false, O: false },
+      choice: { X: null, O: null },
+      winner: null,
+      reveal: null, // { correctIndex } once the contest resolves
+    }
+    this.pendingCellIndex = null
+    this.reveal = null
+    this.banner = 'تصادم القدرات!'
+    this.phase = 'COLLISION_ANNOUNCE'
+    this.announceRemaining = COLLISION_ANNOUNCE_S
+    this.emit()
+    this.startAnnounceTimer()
+  }
+
+  startAnnounceTimer() {
+    this.stopTimer()
+    this.timerId = setInterval(() => {
+      if (this.phase !== 'COLLISION_ANNOUNCE') {
+        this.stopTimer()
+        return
+      }
+      this.announceRemaining -= 1
+      if (this.announceRemaining <= 0) {
+        this.stopTimer()
+        this.openCollisionQuestion()
+      } else {
+        this.emit()
+      }
+    }, 1000)
+  }
+
+  openCollisionQuestion() {
+    const question = this.questionSystem.getNextQuestion()
+    this.questionSystem.openQuestion(question) // no team → no single-answerer rotation
+    this.phase = 'COLLISION_QUESTION'
+    this.banner = null
+    this.questionSeq += 1
+    this.startCollisionTimer()
+    this.emit()
+  }
+
+  startCollisionTimer() {
+    this.stopTimer()
+    this.timerId = setInterval(() => {
+      if (this.phase !== 'COLLISION_QUESTION' || this.collision?.reveal) {
+        this.stopTimer()
+        return
+      }
+      const { expired } = this.questionSystem.tickTimer()
+      if (expired) {
+        this.resolveCollision()
+      } else {
+        this.emit()
+      }
+    }, 1000)
+  }
+
+  submitCollisionAnswer(team, answerIndex) {
+    const c = this.collision
+    if (!c || c.reveal || c.winner) return // resolved / revealing / already won
+    if (team !== 'X' && team !== 'O') return
+    if (c.answered[team] || c.lockedOut[team]) return // one shot per team
+    const question = this.questionSystem.activeQuestion
+    const options = question?.options
+    if (!options || !Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex >= options.length) return
+
+    c.answered[team] = true
+    c.choice[team] = answerIndex
+
+    if (answerIndex === question.correctAnswerIndex) {
+      c.winner = team // first correct answer wins the race
+      this.resolveCollision()
+      return
+    }
+
+    c.lockedOut[team] = true
+    if (c.answered.X && c.answered.O) {
+      this.resolveCollision() // both wrong → nobody takes the cell
+      return
+    }
+    this.emit() // this team is locked out; the other may still answer
+  }
+
+  resolveCollision() {
+    const c = this.collision
+    if (!c || c.reveal) return
+    this.stopTimer()
+    c.reveal = { correctIndex: this.questionSystem.activeQuestion.correctAnswerIndex }
+    this.emit()
+    this.later(() => this.finalizeCollision(), REVEAL_MS)
+  }
+
+  finalizeCollision() {
+    const c = this.collision
+    if (!c) return
+    const { cellIndex, attacker, winner } = c
+    this.questionSystem.closeQuestion()
+    this.reveal = null
+    this.collision = null
+
+    if (winner) {
+      this.setCell(cellIndex, winner)
+      const outcome = this.turnResolver.resolveBoardOutcome(this.board, winner)
+      if (outcome && outcome.type === 'STAGE_WIN') {
+        this.declareStageWinner(winner)
+        return
+      }
+      if (outcome && outcome.type === 'STAGE_DRAW') {
+        this.declareStageDraw()
+        return
+      }
+    }
+
+    // No stage end: the attacker spent their turn on the gambit, so play passes to the
+    // opponent regardless of who (if anyone) won the contested cell.
+    this.currentTurnTeam = attacker === 'X' ? 'O' : 'X'
+    this.abilitySystem.clearArmedAbilities()
+    this.banner = null
+    this.phase = 'TURN_IDLE'
+    this.emit()
+  }
+
   /* -------------------- stage / match end -------------------- */
   declareStageWinner(team) {
     this.matchSystem.lockStage()
@@ -376,7 +531,6 @@ export class GameEngine {
   // team's trap state is masked and only the viewer's own trap squares are serialized.
   // With no viewer (lobby/transition emitters) both teams' traps are masked (safe).
   snapshot(viewerTeam = null) {
-    const q = this.questionSystem
     const abilities = { X: this.abilityStateFor('X'), O: this.abilityStateFor('O') }
     // A trap only ever shows on its owner's own snapshot — mask it for everyone else so
     // 'armed'/'used' can't reveal that a hidden trap was placed.
@@ -399,21 +553,62 @@ export class GameEngine {
       protectedSquares: [...this.abilitySystem.protectedSquares],
       myTraps: viewerTeam ? this.abilitySystem.trapIndicesForOwner(viewerTeam) : [],
       abilities,
-      question:
-        this.phase === 'QUESTION_OPEN' && q.activeQuestion
+      // Timed announcement popup for a same-cell ability collision (no button).
+      announcement:
+        this.phase === 'COLLISION_ANNOUNCE' && this.collision
           ? {
-              seq: this.questionSeq,
-              prompt: q.activeQuestion.question,
-              options: [...q.activeQuestion.options],
-              timeRemaining: q.questionTimeRemaining,
-              answeringTeam: this.currentTurnTeam,
-              answererNumber: q.activeAnswererNumber,
-              answererName: this.answererName(),
-              // correctAnswerIndex is withheld until the reveal (anti-cheat)
-              reveal: this.reveal,
+              text: this.collision.text,
+              subtext: 'هل أنت مستعد؟',
+              caseType: this.collision.caseType,
+              timeRemaining: this.announceRemaining,
             }
           : null,
+      question: this.questionSnapshot(viewerTeam),
     }
+  }
+
+  // The `question` field covers a normal single-team question AND the two-team collision
+  // challenge (mode: 'collision'), scoped to the viewer so each team sees only its own
+  // answer/lock/reveal state (the correct answer stays hidden until the contest resolves).
+  questionSnapshot(viewerTeam) {
+    const q = this.questionSystem
+    if (this.phase === 'QUESTION_OPEN' && q.activeQuestion) {
+      return {
+        seq: this.questionSeq,
+        prompt: q.activeQuestion.question,
+        options: [...q.activeQuestion.options],
+        timeRemaining: q.questionTimeRemaining,
+        answeringTeam: this.currentTurnTeam,
+        answererNumber: q.activeAnswererNumber,
+        answererName: this.answererName(),
+        // correctAnswerIndex is withheld until the reveal (anti-cheat)
+        reveal: this.reveal,
+      }
+    }
+
+    if (this.phase === 'COLLISION_QUESTION' && q.activeQuestion && this.collision) {
+      const c = this.collision
+      const myChoice = viewerTeam ? c.choice[viewerTeam] : null
+      return {
+        seq: this.questionSeq,
+        mode: 'collision',
+        caseType: c.caseType,
+        prompt: q.activeQuestion.question,
+        options: [...q.activeQuestion.options],
+        timeRemaining: q.questionTimeRemaining,
+        // both teams race; a team stops being answerable once it has answered/locked,
+        // once someone has won, or once the contest is resolving.
+        answerable: viewerTeam
+          ? !c.answered[viewerTeam] && !c.lockedOut[viewerTeam] && !c.winner && !c.reveal
+          : false,
+        myChoice: myChoice ?? null,
+        lockedOut: viewerTeam ? c.lockedOut[viewerTeam] : false,
+        winner: c.winner,
+        reveal: c.reveal ? { selectedIndex: myChoice ?? -1, correctIndex: c.reveal.correctIndex } : null,
+      }
+    }
+
+    return null
   }
 
   answererName() {

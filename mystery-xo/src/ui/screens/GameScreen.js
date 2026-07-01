@@ -12,6 +12,7 @@ import { InfoBar } from '../game/InfoBar.js'
 import { Board } from '../game/Board.js'
 import { AbilityBar } from '../game/AbilityBar.js'
 import { QuestionDialog } from '../game/QuestionDialog.js'
+import { CollisionPopup } from '../game/CollisionPopup.js'
 import { MatchEndDialog } from '../game/MatchEndDialog.js'
 
 const WINNING_LINES = [
@@ -25,6 +26,7 @@ export function GameScreen(nav, { room } = {}) {
   let game = null // latest authoritative snapshot
   let questionDialog = null
   let questionSeq = null // server's question id the current dialog is showing
+  let collisionPopup = null // timed ability-collision announcement (before the challenge)
   let matchEndEl = null
   const unsubs = []
 
@@ -94,6 +96,7 @@ export function GameScreen(nav, { room } = {}) {
     })
 
     abilityBar.update(mapAbilities(g.abilities?.[mine]))
+    syncAnnouncement(g)
     syncQuestion(g)
 
     if (g.phase === 'MATCH_END') showMatchEnd(g)
@@ -141,23 +144,31 @@ export function GameScreen(nav, { room } = {}) {
     return set
   }
 
+  // A collision snapshot lets me answer if the server says I'm still eligible (both teams
+  // race); a normal question only if it's my team's turn to answer.
+  function canAnswer(q) {
+    if (!q || q.reveal) return false
+    return q.mode === 'collision' ? !!q.answerable : q.answeringTeam === myTeam()
+  }
+
   function syncQuestion(g) {
     const q = g.question
     if (!q) {
       if (questionDialog) { questionDialog.el.remove(); questionDialog = null; questionSeq = null }
       return
     }
+    const collision = q.mode === 'collision'
     // keyed on the server's question seq so a new question always gets a fresh dialog
     if (!questionDialog || q.seq !== questionSeq) {
       if (questionDialog) questionDialog.el.remove()
       questionSeq = q.seq
       questionDialog = QuestionDialog({
         question: { question: q.prompt, options: q.options },
-        who: { team: q.answeringTeam, number: q.answererNumber },
-        answerable: q.answeringTeam === myTeam(),
+        who: collision ? null : { team: q.answeringTeam, number: q.answererNumber },
+        collision,
+        answerable: canAnswer(q),
         onSelect: (i) => {
-          const cur = game?.question
-          if (cur && cur.answeringTeam === myTeam() && !cur.reveal) {
+          if (canAnswer(game?.question)) {
             questionDialog.markSelected(i) // optimistic lock until the reveal snapshot lands
             socketService.submitAnswer(i)
           }
@@ -166,7 +177,25 @@ export function GameScreen(nav, { room } = {}) {
       el.append(questionDialog.el)
     }
     questionDialog.setTimer(q.timeRemaining)
+    // collision: reflect the server-confirmed lock (e.g. after a reload) and the wait state
+    if (collision && !q.reveal) {
+      if (q.myChoice != null) questionDialog.markSelected(q.myChoice)
+      questionDialog.setWaiting?.((q.myChoice != null || q.lockedOut) && !q.winner)
+    }
     if (q.reveal) questionDialog.reveal(q.reveal.selectedIndex, q.reveal.correctIndex)
+  }
+
+  function syncAnnouncement(g) {
+    const a = g.phase === 'COLLISION_ANNOUNCE' ? g.announcement : null
+    if (!a) {
+      if (collisionPopup) { collisionPopup.el.remove(); collisionPopup = null }
+      return
+    }
+    if (!collisionPopup) {
+      collisionPopup = CollisionPopup({ text: a.text, subtext: a.subtext })
+      el.append(collisionPopup.el)
+    }
+    collisionPopup.setTimer(a.timeRemaining)
   }
 
   function showMatchEnd(g) {

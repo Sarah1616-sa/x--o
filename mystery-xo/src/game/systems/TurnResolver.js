@@ -37,7 +37,7 @@ export class TurnResolver {
   }
 
   if (this.abilitySystem.trapArmedTeam === currentPlayer) {
-    return this.resolveTrapPlacement({ index, board })
+    return this.resolveTrapPlacement({ index, board, currentPlayer })
   }
 
   if (!this.isSquareEmpty(board, index)) {
@@ -45,6 +45,19 @@ export class TurnResolver {
   }
 
   if (this.abilitySystem.powerArmedTeam === currentPlayer) {
+    // باور onto an ENEMY-trapped cell is the rare same-cell collision (Case B): both
+    // teams contest the square with a shared question instead of an instant claim.
+    // باور on an empty or own-trapped cell stays a normal instant claim (unchanged).
+    const trapOwner = this.abilitySystem.trapSquares.get(index)
+    if (trapOwner && trapOwner !== currentPlayer) {
+      return {
+        type: 'ABILITY_COLLISION',
+        caseType: 'B',
+        cellIndex: index,
+        attacker: currentPlayer,
+        defender: trapOwner,
+      }
+    }
     return {
       type: 'POWER_CLAIM',
       cellIndex: index,
@@ -118,8 +131,28 @@ export class TurnResolver {
     }
   }
 
-  resolveTrapPlacement({ index, board }) {
-    if (!this.isSquareEmpty(board, index) || this.abilitySystem.trapSquares.has(index)) {
+  resolveTrapPlacement({ index, board, currentPlayer }) {
+    if (!this.isSquareEmpty(board, index)) {
+      return {
+        type: 'INVALID_TARGET',
+        message: 'INVALID_TRAP_TARGET',
+      }
+    }
+
+    const existingTrapOwner = this.abilitySystem.trapSquares.get(index)
+    if (existingTrapOwner) {
+      // Dropping a trap onto the ENEMY's hidden trap is the same-cell collision (Case A):
+      // both teams contest the square with a shared question.
+      if (existingTrapOwner !== currentPlayer) {
+        return {
+          type: 'ABILITY_COLLISION',
+          caseType: 'A',
+          cellIndex: index,
+          attacker: currentPlayer,
+          defender: existingTrapOwner,
+        }
+      }
+      // Own trap already here → invalid (a team only ever has one trap anyway).
       return {
         type: 'INVALID_TARGET',
         message: 'INVALID_TRAP_TARGET',
