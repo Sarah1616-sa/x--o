@@ -7,6 +7,7 @@ export const SOCKET_EVENTS = {
   MATCH_STARTING: 'match:starting',
   ROOM_CREATE: 'room:create',
   ROOM_JOIN: 'room:join',
+  ROOM_REJOIN: 'room:rejoin',
   ROOM_UPDATE_SETTINGS: 'room:update-settings',
   ROOM_SET_TEAM: 'room:set-team',
   ROOM_LEAVE: 'room:leave',

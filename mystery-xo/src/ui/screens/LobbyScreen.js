@@ -1,10 +1,13 @@
 /* ============================================================
-   LobbyScreen — pre-game multiplayer lobby (full DOM/CSS rebuild).
+   LobbyScreen — pre-game multiplayer lobby.
    Two views inside one screen:
      ENTRY: name + create room / join by code
      ROOM:  share code, team rosters, ready, host settings, start
-   Talks to the preserved socketService singleton. Re-renders the
-   whole room view on every room broadcast (matches the original).
+   Talks to the preserved socketService singleton. The ROOM view is
+   built ONCE into a persistent shell (topbar+logo, scroll-region,
+   footer) and PATCHED IN PLACE on every room broadcast — mirroring
+   GameScreen's { el, update } components — so the logo never flashes
+   and the scroll position is preserved (no snap-to-top on mobile).
    One gold action per screen. Team colors are fixed brand X=red / O=gold.
    ============================================================ */
 import { socketService } from '../../network/socketService.js'
@@ -30,6 +33,10 @@ export function LobbyScreen(nav) {
   let room = socketService.getRoomSnapshot()
   let mode = 'create' // 'create' | 'join'
   const draft = { name: '', code: prefillCode() }
+
+  // Persistent room view ({ el, update }), built once when we enter a room.
+  // While it exists, room broadcasts patch it in place instead of rebuilding.
+  let roomView = null
 
   function prefillCode() {
     const url = new URL(window.location.href)
@@ -97,7 +104,7 @@ export function LobbyScreen(nav) {
     }
   }
 
-  /* -------------------- ROOM VIEW -------------------- */
+  /* -------------------- ROOM: shared readers -------------------- */
   function selfId() {
     return socketService.getSelfPlayerId()
   }
@@ -167,97 +174,160 @@ export function LobbyScreen(nav) {
     )
   }
 
-  function hostSettings() {
-    const editable = isHost()
-    const settings = room?.settings || {}
-    const rounds = settings.stageCount ?? DEFAULT_ROUNDS
-    const maxPlayers = settings.maxPlayers ?? DEFAULT_MAX_PLAYERS
-    // can't cap below the players already in the room
-    const minPlayers = Math.max(2, playerList().length)
-    return h('div', { class: 'card stack', style: { gap: 'var(--s-3)' } },
-      h('h2', { class: 'card__title', style: { fontSize: 'var(--fs-lead)' } }, 'إعدادات المضيف'),
-      stepperRow('عدد الجولات', {
-        value: rounds, min: 1, max: MAX_ROUNDS, editable,
-        onChange: (v) => socketService.updateSettings({ stageCount: v }),
-      }),
-      stepperRow('عدد اللاعبين الأقصى', {
-        value: maxPlayers, min: minPlayers, max: MAX_PLAYERS_CAP, editable,
-        onChange: (v) => socketService.updateSettings({ maxPlayers: v }),
-      }),
+  /* -------------------- ROOM: build-once { el, update } components -------------------- */
+
+  // Room code + share/copy. Code is stable within a room; update() refreshes text + share URL.
+  function CodeCard() {
+    const codeEl = h('div', { class: 'code-display selectable' }, '------')
+    let url = ''
+    const el = h('div', { class: 'card center stack', style: { gap: 'var(--s-3)' } },
+      h('span', { class: 'label', style: { margin: 0 } }, 'كود الغرفة'),
+      codeEl,
+      h('div', { class: 'row', style: { justifyContent: 'center' } },
+        button('نسخ الرابط', { variant: 'secondary', block: false, sm: true, onClick: () => copyLink(url) }),
+        button('مشاركة', { variant: 'secondary', block: false, sm: true, onClick: () => shareRoom(url) }),
+      ),
     )
+    return {
+      el,
+      update() {
+        codeEl.textContent = room?.roomCode || '------'
+        url = room?.roomCode ? buildShareUrl(room.roomCode) : ''
+      },
+    }
   }
 
-  // Every player picks their OWN categories (multi-select). Selections live in the
-  // snapshot, so this re-renders authoritatively on room:update — no local state.
-  function categoryPicker() {
-    const me = self()
-    const selected = new Set(me?.selectedCategories ?? [])
+  // Every player picks their OWN categories (multi-select). Chips are built once;
+  // update() toggles the selected class/aria in place — no rebuild, so tapping a chip
+  // never resets scroll or reloads the logo. Selections stay snapshot-driven.
+  function CategoryPicker() {
+    const chipById = new Map()
     const chips = CATEGORIES.map((cat) => {
-      const on = selected.has(cat.id)
-      return h('button', {
-        class: `cat-chip${on ? ' is-selected' : ''}`,
+      const chip = h('button', {
+        class: 'cat-chip',
         type: 'button',
-        'aria-pressed': on ? 'true' : 'false',
+        'aria-pressed': 'false',
         onClick: () => {
-          const next = new Set(me?.selectedCategories ?? [])
+          const next = new Set(self()?.selectedCategories ?? [])
           if (next.has(cat.id)) next.delete(cat.id)
           else next.add(cat.id)
           socketService.setCategories([...next])
         },
       }, `${cat.emoji} ${cat.label}`)
+      chipById.set(cat.id, chip)
+      return chip
     })
-    return h('div', { class: 'card cat-card stack', style: { gap: 'var(--s-3)' } },
+    const el = h('div', { class: 'card cat-card stack', style: { gap: 'var(--s-3)' } },
       h('h2', { class: 'card__title', style: { fontSize: 'var(--fs-lead)' } }, 'فئات الأسئلة'),
       h('span', { class: 'label', style: { margin: 0 } }, 'اختر فئاتك — تُجمع اختيارات كل اللاعبين'),
       h('div', { class: 'cat-picker' }, ...chips),
     )
+    return {
+      el,
+      update() {
+        const selected = new Set(self()?.selectedCategories ?? [])
+        chipById.forEach((chip, id) => {
+          const on = selected.has(id)
+          chip.classList.toggle('is-selected', on)
+          chip.setAttribute('aria-pressed', on ? 'true' : 'false')
+        })
+      },
+    }
   }
 
-  function renderRoom() {
-    const me = self()
-    const readyCount = playerList().filter((p) => p.ready).length
-    const total = playerList().length
+  // Team-join buttons; built once, update() only toggles disabled by my current team.
+  function JoinRow() {
+    const xBtn = button('انضم X', { variant: 'secondary', onClick: () => socketService.setTeam('X') })
+    const oBtn = button('انضم O', { variant: 'secondary', onClick: () => socketService.setTeam('O') })
+    const el = h('div', { class: 'row', style: { gap: 'var(--s-3)' } }, xBtn, oBtn)
+    return {
+      el,
+      update() {
+        const me = self()
+        xBtn.disabled = !me || me.team === 'X'
+        oBtn.disabled = !me || me.team === 'O'
+      },
+    }
+  }
 
-    const shareUrl = buildShareUrl(room.roomCode)
-    const codeCard = h('div', { class: 'card center stack', style: { gap: 'var(--s-3)' } },
-      h('span', { class: 'label', style: { margin: 0 } }, 'كود الغرفة'),
-      h('div', { class: 'code-display selectable' }, room.roomCode || '------'),
-      h('div', { class: 'row', style: { justifyContent: 'center' } },
-        button('نسخ الرابط', { variant: 'secondary', block: false, sm: true, onClick: () => copyLink(shareUrl) }),
-        button('مشاركة', { variant: 'secondary', block: false, sm: true, onClick: () => shareRoom(shareUrl) }),
-      ),
-    )
+  // Team rosters vary in length; keep the persistent .teams container and refill only
+  // its subtree on update (a localized swap that leaves the scroll-region + logo intact).
+  function TeamRosters() {
+    const el = h('div', { class: 'teams' })
+    return {
+      el,
+      update() {
+        clear(el)
+        el.append(teamColumn('X'), teamColumn('O'))
+      },
+    }
+  }
 
-    const teams = h('div', { class: 'teams' }, teamColumn('X'), teamColumn('O'))
+  // Host settings toggle between read-only values and −/+ steppers by host-ness, so
+  // refill the card subtree on update. Reuses stepperRow(); .card class keeps the desktop grid.
+  function HostSettings() {
+    const el = h('div', { class: 'card stack', style: { gap: 'var(--s-3)' } })
+    return {
+      el,
+      update() {
+        const editable = isHost()
+        const settings = room?.settings || {}
+        const rounds = settings.stageCount ?? DEFAULT_ROUNDS
+        const maxPlayers = settings.maxPlayers ?? DEFAULT_MAX_PLAYERS
+        // can't cap below the players already in the room
+        const minPlayers = Math.max(2, playerList().length)
+        clear(el)
+        el.append(
+          h('h2', { class: 'card__title', style: { fontSize: 'var(--fs-lead)' } }, 'إعدادات المضيف'),
+          stepperRow('عدد الجولات', {
+            value: rounds, min: 1, max: MAX_ROUNDS, editable,
+            onChange: (v) => socketService.updateSettings({ stageCount: v }),
+          }),
+          stepperRow('عدد اللاعبين الأقصى', {
+            value: maxPlayers, min: minPlayers, max: MAX_PLAYERS_CAP, editable,
+            onChange: (v) => socketService.updateSettings({ maxPlayers: v }),
+          }),
+        )
+      },
+    }
+  }
 
-    const joinRow = h('div', { class: 'row', style: { gap: 'var(--s-3)' } },
-      button('انضم X', {
-        variant: 'secondary',
-        disabled: !me || me.team === 'X',
-        onClick: () => socketService.setTeam('X'),
-      }),
-      button('انضم O', {
-        variant: 'secondary',
-        disabled: !me || me.team === 'O',
-        onClick: () => socketService.setTeam('O'),
-      }),
-    )
-
-    // The match auto-starts when everyone is ready and at least one category is
-    // chosen overall, so Ready is the SINGLE gold action for every player.
-    const anyCategory = playerList().some((p) => p.selectedCategories?.length)
-    const readyBtn = button(me?.ready ? 'إلغاء الاستعداد' : 'أنا مستعد', {
+  // Footer: ready hint + "pick a category" nudge + the single gold Ready action.
+  // The match auto-starts when everyone is ready and at least one category is chosen
+  // overall, so Ready is the SINGLE gold action for every player.
+  function ReadyActions() {
+    const hint = h('p', { class: 'roomhint' }, '')
+    const catHint = h('p', { class: 'roomhint' }, 'اختر فئة واحدة على الأقل للبدء')
+    const readyBtn = button('أنا مستعد', {
       variant: 'primary',
-      onClick: () => (me?.ready ? socketService.unready() : socketService.ready()),
+      onClick: () => (self()?.ready ? socketService.unready() : socketService.ready()),
     })
+    const el = h('div', { class: 'stack' }, hint, catHint, readyBtn)
+    return {
+      el,
+      update() {
+        const me = self()
+        const readyCount = playerList().filter((p) => p.ready).length
+        const total = playerList().length
+        const anyCategory = playerList().some((p) => p.selectedCategories?.length)
+        hint.textContent = `${readyCount}/${total} مستعدون`
+        catHint.style.display = anyCategory ? 'none' : ''
+        readyBtn.textContent = me?.ready ? 'إلغاء الاستعداد' : 'أنا مستعد'
+      },
+    }
+  }
 
-    const actions = h('div', { class: 'stack' },
-      h('p', { class: 'roomhint' }, `${readyCount}/${total} مستعدون`),
-      anyCategory ? null : h('p', { class: 'roomhint' }, 'اختر فئة واحدة على الأقل للبدء'),
-      readyBtn,
-    )
+  // Assemble the room view ONCE: persistent topbar (logo built here, never recreated),
+  // a persistent scroll-region body, and a persistent footer. update() patches the parts.
+  function buildRoomView() {
+    const code = CodeCard()
+    const cats = CategoryPicker()
+    const rosters = TeamRosters()
+    const join = JoinRow()
+    const settings = HostSettings()
+    const actions = ReadyActions()
 
-    return screen({
+    const el = screen({
       cls: 'screen--room',
       top: topbar(
         logo({ variant: 'topbar' }),
@@ -266,14 +336,25 @@ export function LobbyScreen(nav) {
         button('مغادرة', { variant: 'secondary', block: false, sm: true, pill: true, onClick: () => leave() }),
       ),
       body: h('div', { class: 'scroll-region stack', style: { gap: 'var(--s-4)' } },
-        codeCard,
-        categoryPicker(),
-        teams,
-        joinRow,
-        hostSettings(),
+        code.el,
+        cats.el,
+        rosters.el,
+        join.el,
+        settings.el,
       ),
-      action: actions,
+      action: actions.el,
     })
+
+    function update() {
+      code.update()
+      cats.update()
+      rosters.update()
+      join.update()
+      settings.update()
+      actions.update()
+    }
+
+    return { el, update }
   }
 
   /* -------------------- actions -------------------- */
@@ -307,9 +388,22 @@ export function LobbyScreen(nav) {
   }
 
   /* -------------------- render + wiring -------------------- */
+  // In a room: build the persistent view once, then PATCH it on every broadcast
+  // (preserves scroll + logo). Otherwise show the entry view. Only entry<->room
+  // transitions clear the root.
   function render() {
-    clear(root)
-    root.append(room && room.roomCode ? renderRoom() : renderEntry())
+    if (room && room.roomCode) {
+      if (!roomView) {
+        clear(root)
+        roomView = buildRoomView()
+        root.append(roomView.el)
+      }
+      roomView.update()
+    } else {
+      roomView = null
+      clear(root)
+      root.append(renderEntry())
+    }
   }
 
   listen(SOCKET_EVENTS.ROOM_CREATED, (p) => { room = p.room ?? socketService.getRoomSnapshot(); render() })

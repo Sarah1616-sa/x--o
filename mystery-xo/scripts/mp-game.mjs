@@ -65,5 +65,24 @@ console.log('after correct answer — X marks on board:', xOnHost, '| host turnl
 await A.screenshot({ path: `${dir}/g-host-3.png` })
 await B.screenshot({ path: `${dir}/g-guest-3.png` })
 
+// ---- reload host mid-match: must REJOIN the same game (scores intact), NOT end the match ----
+// The reloaded tab keeps its reconnect token in sessionStorage and auto-rejoins on boot.
+await A.reload({ waitUntil: 'domcontentloaded' })
+await A.waitForSelector('.board', { timeout: 10000 }).catch(() => {})
+await wait(A, 1000); await wait(B, 600)
+const boardBackA = await A.locator('.board').count()
+const xAfterReload = await A.locator('.cell.is-x').count()
+const matchEndOnA = await A.locator('.matchend').count()
+const matchEndOnB = await B.locator('.matchend').count()
+const turnB = (await B.locator('.turnline').first().textContent().catch(() => '')).trim()
+await A.screenshot({ path: `${dir}/g-host-4-reload.png` })
+await B.screenshot({ path: `${dir}/g-guest-4-reload.png` })
+const reloadOk = boardBackA > 0 && xAfterReload === xOnHost && matchEndOnA === 0 && matchEndOnB === 0
+console.log('after host RELOAD — host rejoined board:', boardBackA > 0,
+  '| X marks preserved:', xAfterReload, `(was ${xOnHost})`,
+  '| match-end shown anywhere:', matchEndOnA + matchEndOnB > 0,
+  '| guest turnline:', turnB)
+console.log(reloadOk ? 'RELOAD PASS — rejoined same game, match did not end' : 'RELOAD FAIL')
+
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no console/page errors')
 await browser.close()

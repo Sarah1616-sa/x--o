@@ -337,6 +337,10 @@ export class RoomManager {
     return room
   }
 
+  // A socket dropped (reload, tab close, network blip). We DON'T remove the player or
+  // touch the engine here — that would end an in-progress match on every reload. We only
+  // flag them offline and keep their reconnect token valid. socket.js starts a grace
+  // timer; either reconnectPlayer() cancels it, or finalizeDisconnect() removes them.
   disconnectPlayer(socketId) {
     const session = this.playerSessions.get(socketId)
 
@@ -359,6 +363,13 @@ export class RoomManager {
     }
 
     this.playerSessions.delete(socketId)
+
+    // Stale socket: a newer socket already reclaimed this player (reconnect raced ahead
+    // of this old socket's disconnect). Drop only the stale session; leave state intact.
+    if (player.socketId && player.socketId !== socketId) {
+      return null
+    }
+
     player.connected = false
     player.ready = false
     player.lastSeenAt = Date.now()
@@ -367,19 +378,76 @@ export class RoomManager {
 
     const hostChanged = this.reassignHostIfNeeded(room)
 
-    // In-game disconnect: if a whole team has dropped, end the match for the other
-    // side (no reconnect path yet, so this avoids an unwinnable hang). emit() is
-    // already wired, so the forfeit broadcasts a MATCH_END snapshot to survivors.
-    if (room.engine && !room.engine.isMatchOver()) {
-      const connected = this.getConnectedPlayers(room)
-      const connX = connected.filter((p) => p.team === 'X').length
-      const connO = connected.filter((p) => p.team === 'O').length
-      if (connX === 0 && connO > 0) room.engine.forfeit('O')
-      else if (connO === 0 && connX > 0) room.engine.forfeit('X')
+    return {
+      room,
+      destroyed: false,
+      removedPlayer: player,
+      hostChanged,
+    }
+  }
+
+  // Reattach a returning player (same reconnect token) to their existing in-memory
+  // session — same playerId, team, and running engine, so scores/board are intact.
+  reconnectPlayer({ reconnectToken, socketId }) {
+    const ref = this.reconnectTokens.get(reconnectToken)
+
+    if (!ref) {
+      throw new Error('Session expired.')
     }
 
+    const room = this.rooms.get(ref.roomCode)
+
+    if (!room) {
+      this.reconnectTokens.delete(reconnectToken)
+      throw new Error('Session expired.')
+    }
+
+    const player = room.players[ref.playerId]
+
+    if (!player) {
+      this.reconnectTokens.delete(reconnectToken)
+      throw new Error('Session expired.')
+    }
+
+    player.connected = true
+    player.socketId = socketId
+    player.lastSeenAt = Date.now()
+    room.updatedAt = Date.now()
+    this.attachSocketSession(socketId, room.roomCode, player.playerId)
+
+    const hostChanged = this.reassignHostIfNeeded(room)
+
+    return {
+      room,
+      player,
+      hostChanged,
+    }
+  }
+
+  // Grace window expired with no reconnect → actually remove the player. This is where
+  // the deferred forfeit / room teardown happens (moved out of disconnectPlayer).
+  finalizeDisconnect(roomCode, playerId) {
+    const room = this.rooms.get(roomCode)
+
+    if (!room) {
+      return null
+    }
+
+    const player = room.players[playerId]
+
+    // Gone already, or they reconnected inside the grace window → nothing to do.
+    if (!player || player.connected) {
+      return null
+    }
+
+    this.reconnectTokens.delete(player.reconnectToken)
+    this.removePlayerFromRoom(room, playerId)
+    room.updatedAt = Date.now()
+
+    this.forfeitIfTeamEmpty(room)
+
     // Room fully abandoned → tear down the engine (stops its timers) and delete it.
-    if (this.getConnectedPlayers(room).length === 0) {
+    if (this.getRoomPlayerCount(room) === 0) {
       room.engine?.destroy()
       room.engine = null
       this.clearRoomReconnectTokens(room)
@@ -391,6 +459,8 @@ export class RoomManager {
         hostChanged: false,
       }
     }
+
+    const hostChanged = this.reassignHostIfNeeded(room)
 
     return {
       room,
@@ -424,6 +494,8 @@ export class RoomManager {
     this.playerSessions.delete(socketId)
     this.reconnectTokens.delete(player.reconnectToken)
     this.removePlayerFromRoom(room, player.playerId)
+
+    this.forfeitIfTeamEmpty(room)
 
     if (this.getRoomPlayerCount(room) === 0) {
       room.engine?.destroy()
@@ -504,6 +576,25 @@ export class RoomManager {
 
   getConnectedPlayers(room) {
     return Object.values(room.players).filter((player) => player.connected)
+  }
+
+  // A live match with one side emptied (by removal or a grace-expired drop) can't be won —
+  // end it for the other team. emit() is already wired, so forfeit broadcasts MATCH_END to
+  // the survivors. Shared by finalizeDisconnect (timed-out drop) and leavePlayer (مغادرة).
+  forfeitIfTeamEmpty(room) {
+    if (!room.engine || room.engine.isMatchOver()) {
+      return
+    }
+
+    const connected = this.getConnectedPlayers(room)
+    const connX = connected.filter((player) => player.team === 'X').length
+    const connO = connected.filter((player) => player.team === 'O').length
+
+    if (connX === 0 && connO > 0) {
+      room.engine.forfeit('O')
+    } else if (connO === 0 && connX > 0) {
+      room.engine.forfeit('X')
+    }
   }
 
   getOldestConnectedPlayer(room) {

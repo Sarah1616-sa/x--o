@@ -1,6 +1,20 @@
 import { roomManager } from './rooms/roomManager.js'
 import { validateCategoryIds, validateMaxPlayers, validatePlayerName, validateRoomCode, validateRoomSettingsPatch } from './validators/roomValidators.js'
 
+// A dropped socket (reload / blip) has this long to reconnect with its token before the
+// player is actually removed (and, mid-match, the match forfeits). Keyed by playerId so a
+// reconnect can cancel a pending removal. Override with RECONNECT_GRACE_MS (ms) — handy for tests.
+const RECONNECT_GRACE_MS = Number(process.env.RECONNECT_GRACE_MS) || 30_000
+const removalTimers = new Map()
+
+function cancelRemovalTimer(playerId) {
+  const timer = removalTimers.get(playerId)
+  if (timer) {
+    clearTimeout(timer)
+    removalTimers.delete(playerId)
+  }
+}
+
 function emitSocketError(socket, event, message) {
   socket.emit(event, {
     ok: false,
@@ -102,6 +116,44 @@ export function registerSocketHandlers(io) {
           reconnectToken: player.reconnectToken,
           room: roomManager.buildRoomSnapshot(room),
         })
+        broadcastRoomUpdate(io, room)
+      } catch (error) {
+        emitSocketError(socket, 'room:error', error.message)
+      }
+    })
+
+    // Same player returning after a reload / short drop. Reattaches to the existing
+    // in-memory session (same team + running engine) via their reconnect token — the
+    // match keeps going with scores intact. Reuses the room:joined event so the client
+    // restores identity + room exactly as on a normal join.
+    socket.on('room:rejoin', (payload = {}) => {
+      try {
+        const { room, player, hostChanged } = roomManager.reconnectPlayer({
+          reconnectToken: payload.reconnectToken,
+          socketId: socket.id,
+        })
+
+        cancelRemovalTimer(player.playerId)
+        socket.join(room.roomCode)
+        socket.emit('room:joined', {
+          playerId: player.playerId,
+          reconnectToken: player.reconnectToken,
+          room: roomManager.buildRoomSnapshot(room, player.team),
+        })
+
+        // Mid-match: push the current authoritative game state to just this socket so
+        // GameScreen renders the live board/question/timer immediately on return.
+        if (room.engine) {
+          const snapshot = roomManager.buildRoomSnapshot(room, player.team)
+          io.to(socket.id).emit('game:snapshot', {
+            room: snapshot,
+            game: snapshot.game,
+          })
+        }
+
+        if (hostChanged) {
+          broadcastHostChanged(io, room)
+        }
         broadcastRoomUpdate(io, room)
       } catch (error) {
         emitSocketError(socket, 'room:error', error.message)
@@ -217,6 +269,11 @@ export function registerSocketHandlers(io) {
         socket.leave(session.roomCode)
       }
 
+      // Explicit leave = final; drop any grace timer that may be pending for this player.
+      if (result?.removedPlayer) {
+        cancelRemovalTimer(result.removedPlayer.playerId)
+      }
+
       if (result?.room) {
         if (result.hostChanged) {
           broadcastHostChanged(io, result.room)
@@ -229,13 +286,33 @@ export function registerSocketHandlers(io) {
     socket.on('disconnect', () => {
       const result = roomManager.disconnectPlayer(socket.id)
 
-      if (result?.room) {
-        if (result.hostChanged) {
-          broadcastHostChanged(io, result.room)
-        }
-
-        broadcastRoomUpdate(io, result.room)
+      if (!result?.room) {
+        return
       }
+
+      if (result.hostChanged) {
+        broadcastHostChanged(io, result.room)
+      }
+      broadcastRoomUpdate(io, result.room)
+
+      // Don't remove the player yet — give them a grace window to reconnect (reload).
+      // If they don't return, finalizeDisconnect() removes them and forfeits if needed.
+      const { roomCode } = result.room
+      const { playerId } = result.removedPlayer
+      cancelRemovalTimer(playerId)
+      removalTimers.set(
+        playerId,
+        setTimeout(() => {
+          removalTimers.delete(playerId)
+          const finalized = roomManager.finalizeDisconnect(roomCode, playerId)
+          if (finalized?.room) {
+            if (finalized.hostChanged) {
+              broadcastHostChanged(io, finalized.room)
+            }
+            broadcastRoomUpdate(io, finalized.room)
+          }
+        }, RECONNECT_GRACE_MS),
+      )
     })
   })
 }

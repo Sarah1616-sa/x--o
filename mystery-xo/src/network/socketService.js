@@ -53,6 +53,54 @@ function updateSelfIdentity(playerId, reconnectToken) {
   state.reconnectToken = reconnectToken ?? state.reconnectToken
 }
 
+// Persist just enough to rejoin the same room after a reload. sessionStorage survives a
+// reload but is scoped to this tab, so two tabs (host/guest) never clash. The URL also
+// carries the code (#/room/CODE) so the reloaded page visibly belongs to a room.
+const SESSION_KEY = 'xo:session'
+
+function setRoomHash(roomCode) {
+  const target = `#/room/${roomCode}`
+  if (window.location.hash !== target) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + target)
+  }
+}
+
+function clearRoomHash() {
+  if (window.location.hash) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search)
+  }
+}
+
+function saveSession(roomCode, reconnectToken) {
+  if (!roomCode || !reconnectToken) {
+    return
+  }
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ roomCode, reconnectToken }))
+  } catch {
+    // sessionStorage unavailable (private mode / disabled) — reconnect just won't persist.
+  }
+  setRoomHash(roomCode)
+}
+
+function readSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function clearSession() {
+  try {
+    sessionStorage.removeItem(SESSION_KEY)
+  } catch {
+    // ignore
+  }
+  clearRoomHash()
+}
+
 socket.on('connect', () => {
   state.connected = true
   notify('connect', getState())
@@ -67,13 +115,17 @@ socket.on(SOCKET_EVENTS.ROOM_CREATED, (payload) => {
   state.lastError = null
   updateSelfIdentity(payload.playerId, payload.reconnectToken)
   updateRoom(payload)
+  saveSession(state.room?.roomCode, state.reconnectToken)
   notify(SOCKET_EVENTS.ROOM_CREATED, { ...payload, room: state.room })
 })
 
+// Fires for both a fresh join and a rejoin (the server reuses room:joined on reconnect),
+// so persisting here keeps the session/URL valid across reloads either way.
 socket.on(SOCKET_EVENTS.ROOM_JOINED, (payload) => {
   state.lastError = null
   updateSelfIdentity(payload.playerId, payload.reconnectToken)
   updateRoom(payload)
+  saveSession(state.room?.roomCode, state.reconnectToken)
   notify(SOCKET_EVENTS.ROOM_JOINED, { ...payload, room: state.room })
 })
 
@@ -240,6 +292,31 @@ function joinRoom(roomCode, playerName) {
   return request(SOCKET_EVENTS.ROOM_JOIN, { roomCode, playerName }, SOCKET_EVENTS.ROOM_JOINED)
 }
 
+// Is there a persisted session from a previous page load worth trying to rejoin?
+function hasSavedSession() {
+  return Boolean(readSession()?.reconnectToken)
+}
+
+// Reattach to a room after a reload using the persisted reconnect token. Resolves with the
+// room:joined payload (identity + room, incl. live game state); rejects if the token is stale
+// (server restarted / room gone), clearing the saved session so boot falls back to the menu.
+function rejoin() {
+  const saved = readSession()
+
+  if (!saved?.reconnectToken) {
+    return Promise.reject(new Error('No saved session.'))
+  }
+
+  return request(
+    SOCKET_EVENTS.ROOM_REJOIN,
+    { reconnectToken: saved.reconnectToken },
+    SOCKET_EVENTS.ROOM_JOINED,
+  ).catch((error) => {
+    clearSession()
+    throw error
+  })
+}
+
 function ready() {
   emit(SOCKET_EVENTS.PLAYER_READY)
 }
@@ -264,6 +341,9 @@ function leaveRoom() {
   emit(SOCKET_EVENTS.ROOM_LEAVE)
   state.room = null
   state.game = null
+  state.selfPlayerId = null
+  state.reconnectToken = null
+  clearSession()
 }
 
 function updateSettings(patch) {
@@ -320,6 +400,8 @@ export const socketService = {
   request,
   createRoom,
   joinRoom,
+  hasSavedSession,
+  rejoin,
   ready,
   unready,
   setCategories,
