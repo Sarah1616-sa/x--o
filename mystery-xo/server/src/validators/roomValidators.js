@@ -1,4 +1,5 @@
 import { MAX_ROOM_PLAYERS, MIN_ROOM_PLAYERS } from '../constants/roomConstants.js'
+import { MAX_STAGES } from '../../../src/game/constants/gameConstants.js'
 import { CATEGORY_IDS } from '../../../src/game/data/questions/index.js'
 
 const VALID_CATEGORY_IDS = new Set(CATEGORY_IDS)
@@ -38,8 +39,8 @@ export function validateTimerDuration(timerDuration) {
 }
 
 export function validateStageCount(stageCount) {
-  if (!Number.isInteger(stageCount) || stageCount < 1 || stageCount > 20) {
-    throw new Error('Stage count must be an integer between 1 and 20.')
+  if (!Number.isInteger(stageCount) || stageCount < 1 || stageCount > MAX_STAGES) {
+    throw new Error(`Rounds must be an integer between 1 and ${MAX_STAGES}.`)
   }
 
   return stageCount

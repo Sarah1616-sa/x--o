@@ -10,7 +10,7 @@ export function MainMenuScreen(nav) {
     centered: true,
     body: h('div', { class: 'brand' },
       logo({ variant: 'splash' }),
-      h('p', { class: 'brand__tagline' }, 'إكس أو الجماعية — العب مع أصدقائك'),
+      h('p', { class: 'brand__tagline' }, 'فكّر بسرعة، جاوب صح، واكسب المربّع!'),
     ),
     action: button('العب', {
       variant: 'primary',

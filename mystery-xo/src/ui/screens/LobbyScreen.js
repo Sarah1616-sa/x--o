@@ -13,6 +13,9 @@ import { CATEGORIES } from '../../game/data/questions/index.js'
 import { h, clear, screen, topbar, logo, button, field, badge, toast } from '../dom.js'
 
 const DEFAULT_MAX_PLAYERS = 8
+const DEFAULT_ROUNDS = 3
+const MAX_PLAYERS_CAP = 10
+const MAX_ROUNDS = 5
 const CATEGORY_BY_ID = new Map(CATEGORIES.map((c) => [c.id, c]))
 const categoryLabel = (id) => {
   const c = CATEGORY_BY_ID.get(id)
@@ -139,26 +142,48 @@ export function LobbyScreen(nav) {
     )
   }
 
-  function hostSettings() {
-    if (!isHost()) return null
-    const current = room?.settings?.maxPlayers ?? DEFAULT_MAX_PLAYERS
-    const minimum = Math.max(2, playerList().length)
-    const valueEl = h('span', { class: 'stepper__value' }, String(current))
-    const setMax = (next) => {
-      const clamped = Math.max(minimum, Math.min(20, next))
-      valueEl.textContent = String(clamped)
-      socketService.updateSettings({ maxPlayers: clamped })
+  // One settings row: host gets a −/value/+ stepper; everyone else sees the value
+  // read-only. Server is authoritative — it re-validates and rejects non-host changes.
+  function stepperRow(label, { value, min, max, editable, onChange }) {
+    if (!editable) {
+      return h('div', { class: 'row row--between' },
+        h('span', { class: 'label', style: { margin: 0 } }, label),
+        h('span', { class: 'stepper__value' }, String(value)),
+      )
     }
+    const valueEl = h('span', { class: 'stepper__value' }, String(value))
+    const set = (next) => {
+      const clamped = Math.max(min, Math.min(max, next))
+      valueEl.textContent = String(clamped)
+      onChange(clamped)
+    }
+    return h('div', { class: 'row row--between' },
+      h('span', { class: 'label', style: { margin: 0 } }, label),
+      h('div', { class: 'stepper' },
+        button('−', { variant: 'secondary', block: false, sm: true, onClick: () => set(value - 1) }),
+        valueEl,
+        button('+', { variant: 'secondary', block: false, sm: true, onClick: () => set(value + 1) }),
+      ),
+    )
+  }
+
+  function hostSettings() {
+    const editable = isHost()
+    const settings = room?.settings || {}
+    const rounds = settings.stageCount ?? DEFAULT_ROUNDS
+    const maxPlayers = settings.maxPlayers ?? DEFAULT_MAX_PLAYERS
+    // can't cap below the players already in the room
+    const minPlayers = Math.max(2, playerList().length)
     return h('div', { class: 'card stack', style: { gap: 'var(--s-3)' } },
       h('h2', { class: 'card__title', style: { fontSize: 'var(--fs-lead)' } }, 'إعدادات المضيف'),
-      h('div', { class: 'row row--between' },
-        h('span', { class: 'label', style: { margin: 0 } }, 'عدد اللاعبين الأقصى'),
-        h('div', { class: 'stepper' },
-          button('−', { variant: 'secondary', block: false, sm: true, onClick: () => setMax(current - 1) }),
-          valueEl,
-          button('+', { variant: 'secondary', block: false, sm: true, onClick: () => setMax(current + 1) }),
-        ),
-      ),
+      stepperRow('عدد الجولات', {
+        value: rounds, min: 1, max: MAX_ROUNDS, editable,
+        onChange: (v) => socketService.updateSettings({ stageCount: v }),
+      }),
+      stepperRow('عدد اللاعبين الأقصى', {
+        value: maxPlayers, min: minPlayers, max: MAX_PLAYERS_CAP, editable,
+        onChange: (v) => socketService.updateSettings({ maxPlayers: v }),
+      }),
     )
   }
 

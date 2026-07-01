@@ -1195,38 +1195,108 @@ button {
 }
 
 /* match end + stage result */
-.matchend__mark {
-  width: 96px;
-  height: 96px;
-  margin: 0 auto var(--s-4);
+/* congratulations pill (reuses .badge — gold sticker, maroon ink) */
+.matchend__congrats {
+  margin-block-end: var(--s-4);
+}
+/* winning team: crown sticker perched above a big badge with a gold ring */
+.matchend__winner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 auto var(--s-3);
+}
+.matchend__crown {
   display: grid;
   place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--cream);
+  border: var(--stroke-w) solid var(--maroon);
+  box-shadow: var(--shadow-hard);
+  font-size: 1.25rem;
+  line-height: 1;
+  margin-block-end: -14px;
+  z-index: 1;
+}
+.matchend__badge {
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: var(--stroke-w) solid var(--maroon);
+  font-family: var(--font-display);
+  font-size: 3.6rem;
+  line-height: 1;
+  /* cream gap + gold ring (visible even on the gold O badge) + hard maroon drop */
+  box-shadow:
+    0 0 0 4px var(--cream),
+    0 0 0 9px var(--gold),
+    0 var(--lift) 0 var(--maroon);
+}
+.matchend__badge--x {
+  background: var(--red);
+  color: var(--cream);
+}
+.matchend__badge--o {
+  background: var(--gold);
+  color: var(--maroon);
+}
+/* two-team scoreboard: each score is a standalone number BELOW its medallion */
+.matchend__round {
+  margin-block-start: calc(-1 * var(--s-3));
+}
+.matchend__scoreboard {
+  display: flex;
+  gap: var(--s-3);
+  justify-content: center;
+  margin: var(--s-4) 0 var(--s-5);
+}
+.matchend__team {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-2);
+  border-radius: var(--radius);
+  border: 2px solid transparent;
+}
+.matchend__team--win {
+  background: color-mix(in srgb, var(--gold) 20%, var(--cream));
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 45%, transparent);
+}
+.matchend__team--lose {
+  opacity: 0.5;
+}
+.matchend__medallion {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   border: var(--stroke-w) solid var(--maroon);
   box-shadow: var(--shadow-hard);
   font-family: var(--font-display);
-  font-size: 3.4rem;
+  font-size: 1.7rem;
   line-height: 1;
 }
-.matchend__mark--x {
+.matchend__medallion--x {
   background: var(--red);
   color: var(--cream);
 }
-.matchend__mark--o {
+.matchend__medallion--o {
   background: var(--gold);
   color: var(--maroon);
 }
-.matchend__mark--draw {
-  background: var(--cream-2);
-  color: var(--maroon);
-  font-size: 2.2rem;
-}
-.matchend__score {
+.matchend__team-score {
   font-family: var(--font-display);
-  font-size: var(--fs-title);
+  font-size: 2.4rem;
   color: var(--maroon);
-  margin: 0 0 var(--s-5);
-  direction: ltr;
+  line-height: 1;
 }
 
 /* a brief stage-result banner (no motion — appears/leaves instantly) */

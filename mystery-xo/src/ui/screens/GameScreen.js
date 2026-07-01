@@ -174,6 +174,8 @@ export function GameScreen(nav, { room } = {}) {
     matchEndEl = MatchEndDialog({
       winner: g.matchWinner,
       stageScores: g.stageScores,
+      currentStage: g.currentStage,
+      maxStages: g.maxStages,
       onPlayAgain: null, // server-authoritative: no local replay
       onLeave: leaveGame,
     })
