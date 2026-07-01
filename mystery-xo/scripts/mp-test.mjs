@@ -49,8 +49,8 @@ await clickText(B, 'انضمام لغرفة')
 await wait(B, 1500)
 
 // ---- PICK CATEGORY + READY (match auto-starts once both are ready) ----
-await B.locator('.cat-chip').first().click(); await wait(B, 400)
-await A.locator('.cat-chip').first().click(); await wait(A, 400)
+await B.locator('.cat-chip', { hasText: 'جغرافيا' }).first().click(); await wait(B, 400)
+await A.locator('.cat-chip', { hasText: 'جغرافيا' }).first().click(); await wait(A, 400)
 await clickText(B, 'أنا مستعد'); await wait(B, 800)
 await clickText(A, 'أنا مستعد')
 await wait(A, 1800); await wait(B, 1800)

@@ -26,12 +26,18 @@ function broadcastHostChanged(io, room) {
 }
 
 // The authoritative game snapshot — the single in-game state event clients render from.
+// Sent PER PLAYER (scoped to their team) so a placed trap stays hidden from the enemy:
+// each team only ever receives its own trap squares and never sees the other team's
+// trap flip to 'used'.
 function broadcastGameSnapshot(io, room) {
-  const snapshot = roomManager.buildRoomSnapshot(room)
-  io.to(room.roomCode).emit('game:snapshot', {
-    room: snapshot,
-    game: snapshot.game,
-  })
+  for (const player of Object.values(room.players)) {
+    if (!player.connected || !player.socketId) continue
+    const snapshot = roomManager.buildRoomSnapshot(room, player.team)
+    io.to(player.socketId).emit('game:snapshot', {
+      room: snapshot,
+      game: snapshot.game,
+    })
+  }
 }
 
 // Kicks off a room whose engine has already been built (by beginMatch/startMatch):

@@ -133,6 +133,16 @@ export class AbilitySystem {
     this.trapSquares.delete(index)
   }
 
+  // Indices of traps owned by a team — used to show a team ONLY its own traps
+  // (enemy traps are never serialized into that team's snapshot).
+  trapIndicesForOwner(team) {
+    const indices = []
+    for (const [index, owner] of this.trapSquares) {
+      if (owner === team) indices.push(index)
+    }
+    return indices
+  }
+
   consumeClaimAt(index) {
     this.clearArmedAbilities()
     this.trapSquares.delete(index)

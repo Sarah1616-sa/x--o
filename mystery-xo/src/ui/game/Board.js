@@ -8,7 +8,7 @@ export function Board(onCellClick) {
   }
   const el = h('div', { class: 'board', role: 'grid' }, ...cells)
 
-  function render({ board, winLine = null, targets = new Set(), protectedSet = new Set() } = {}) {
+  function render({ board, winLine = null, targets = new Set(), protectedSet = new Set(), trapSet = new Set() } = {}) {
     const flat = Array.isArray(board[0]) ? board.flat() : board
     cells.forEach((cell, i) => {
       const v = flat[i]
@@ -20,6 +20,10 @@ export function Board(onCellClick) {
       if (targets.has(i)) cell.classList.add('is-target')
       if (protectedSet.has && protectedSet.has(i)) {
         cell.append(h('span', { class: 'cell__mark cell__mark--shield' }))
+      }
+      // Only the trap's owner receives these indices (server hides them from the enemy).
+      if (trapSet.has && trapSet.has(i)) {
+        cell.append(h('span', { class: 'cell__mark cell__mark--trap' }))
       }
     })
   }

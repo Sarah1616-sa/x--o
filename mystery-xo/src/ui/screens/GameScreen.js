@@ -89,6 +89,8 @@ export function GameScreen(nav, { room } = {}) {
       winLine: computeWinLine(g),
       targets: targets(g),
       protectedSet: new Set(g.protectedSquares || []),
+      // only my own traps arrive in the snapshot; the enemy never receives theirs
+      trapSet: new Set(g.myTraps || []),
     })
 
     abilityBar.update(mapAbilities(g.abilities?.[mine]))

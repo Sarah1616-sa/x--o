@@ -181,8 +181,10 @@ export class GameEngine {
         this.applyTurnResult(this.turnResolver.createSwitchTurnResult('SHIELD_APPLIED'))
         return
       case 'PLACE_TRAP':
+        // Placement is FREE: consume the once-per-match trap (clears the armed state)
+        // but keep the player's turn — they still answer a question and claim a cell.
         this.abilitySystem.consumeTrapPlacement(this.currentTurnTeam, result.cellIndex)
-        this.applyTurnResult(this.turnResolver.createSwitchTurnResult('TRAP_PLACED'))
+        this.emit()
         return
       case 'SWITCH_TURN':
         this.switchTurn()
@@ -370,8 +372,17 @@ export class GameEngine {
   }
 
   /* -------------------- the authoritative snapshot sent to clients -------------------- */
-  snapshot() {
+  // viewerTeam scopes the snapshot to one team so the trap stays secret: the OTHER
+  // team's trap state is masked and only the viewer's own trap squares are serialized.
+  // With no viewer (lobby/transition emitters) both teams' traps are masked (safe).
+  snapshot(viewerTeam = null) {
     const q = this.questionSystem
+    const abilities = { X: this.abilityStateFor('X'), O: this.abilityStateFor('O') }
+    // A trap only ever shows on its owner's own snapshot — mask it for everyone else so
+    // 'armed'/'used' can't reveal that a hidden trap was placed.
+    for (const t of ['X', 'O']) {
+      if (t !== viewerTeam) abilities[t] = { ...abilities[t], trap: 'disabled' }
+    }
     return {
       phase: this.phase,
       board: this.flatBoard(),
@@ -383,9 +394,11 @@ export class GameEngine {
       matchComplete: this.matchSystem.matchComplete,
       matchWinner: this.matchWinner,
       banner: this.banner,
-      // protected (shield) squares are public; trap squares are intentionally hidden
+      // protected (shield) squares are public; trap squares are hidden from the enemy —
+      // only the viewer's OWN traps are sent so they can see where they placed them.
       protectedSquares: [...this.abilitySystem.protectedSquares],
-      abilities: { X: this.abilityStateFor('X'), O: this.abilityStateFor('O') },
+      myTraps: viewerTeam ? this.abilitySystem.trapIndicesForOwner(viewerTeam) : [],
+      abilities,
       question:
         this.phase === 'QUESTION_OPEN' && q.activeQuestion
           ? {

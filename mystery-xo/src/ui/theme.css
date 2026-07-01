@@ -688,6 +688,9 @@ button {
 .cell__mark--shield {
   background: var(--ok);
 }
+.cell__mark--trap {
+  background: var(--red);
+}
 
 /* ============================================================
    lobby pieces

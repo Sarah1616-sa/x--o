@@ -457,7 +457,7 @@ export class RoomManager {
     return this.buildRoomSnapshot(room)
   }
 
-  buildRoomSnapshot(room) {
+  buildRoomSnapshot(room, viewerTeam = null) {
     const players = Object.fromEntries(
       Object.values(room.players).map((player) => [
         player.playerId,
@@ -494,8 +494,9 @@ export class RoomManager {
           playerIds: [...room.teams.O.playerIds],
         },
       },
-      // authoritative game state from the engine (null until the match starts)
-      game: room.engine ? room.engine.snapshot() : null,
+      // authoritative game state from the engine (null until the match starts).
+      // viewerTeam scopes it so the trap stays hidden from the enemy team.
+      game: room.engine ? room.engine.snapshot(viewerTeam) : null,
       createdAt: room.createdAt,
       updatedAt: room.updatedAt,
     }
