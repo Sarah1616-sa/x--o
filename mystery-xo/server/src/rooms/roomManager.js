@@ -292,8 +292,13 @@ export class RoomManager {
       throw new Error(startState.reason)
     }
 
+    // Roster in turn order — each entry carries the player's own selected
+    // categories so the engine can draw that answerer's question from THEIR cats.
     const rosterFor = (team) =>
-      room.teams[team].playerIds.map((id) => room.players[id]?.name).filter(Boolean)
+      room.teams[team].playerIds
+        .map((id) => room.players[id])
+        .filter(Boolean)
+        .map((p) => ({ name: p.name, categories: [...p.selectedCategories] }))
     const rosters = { X: rosterFor('X'), O: rosterFor('O') }
 
     // The question pool is the union of every player's selected categories (falls
