@@ -29,9 +29,6 @@ const WINNING_LINES = [
 const REVEAL_MS = 900
 const STAGE_PAUSE_MS = 2200
 const ABILITY_KEYS = ['power', 'shield', 'steal', 'trap']
-// Announcement duration for a same-cell ability collision. Overridable (e.g. for tests)
-// via env; this is a server-only file so process.env is safe here.
-const COLLISION_ANNOUNCE_S = Number(process.env.COLLISION_ANNOUNCE_SECONDS) || COLLISION_ANNOUNCE_SECONDS
 const COLLISION_TEXT = { A: COLLISION_TEXT_A, B: COLLISION_TEXT_B }
 
 function emptyBoard() {
@@ -330,7 +327,7 @@ export class GameEngine {
     this.reveal = null
     this.banner = 'تصادم القدرات!'
     this.phase = 'COLLISION_ANNOUNCE'
-    this.announceRemaining = COLLISION_ANNOUNCE_S
+    this.announceRemaining = COLLISION_ANNOUNCE_SECONDS
     this.emit()
     this.startAnnounceTimer()
   }

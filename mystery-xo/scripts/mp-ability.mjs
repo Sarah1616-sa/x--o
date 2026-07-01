@@ -1,7 +1,7 @@
 // Ability-collision smoke test (same-cell فخ-vs-فخ and فخ-vs-باور), plus a control that a
-// NORMAL باور on an empty cell still claims instantly with no question.
-// Run the server with a SHORT announcement so the timed popup doesn't take ~12s:
-//   COLLISION_ANNOUNCE_SECONDS=2 node server/src/index.js
+// NORMAL باور on an empty cell still claims instantly with no question. Also asserts the
+// timed announcement popup holds the full server-controlled ~9s before the question opens.
+//   node server/src/index.js
 //   BASE_URL=http://localhost:3001 node scripts/mp-ability.mjs <dir>
 import { chromium } from 'playwright'
 import { buildQuestionPool } from '../src/game/data/questions/index.js'
@@ -96,7 +96,9 @@ async function runCollision(tag, oAbility, expectText, { xPick, oPick, expectOwn
 
   // O collides on cell 4 (trap → Case A, power → Case B): arm chip then click cell 4.
   await B.locator('.abilitybar .ability').nth(oAbility === 'trap' ? 3 : 0).click(); await wait(B, 400)
-  await B.locator('.cell').nth(4).click(); await wait(B, 700); await wait(A, 400)
+  await B.locator('.cell').nth(4).click()
+  const t0 = Date.now() // collision triggered → the ~9s announcement countdown starts now
+  await wait(B, 700); await wait(A, 400)
 
   // Timed announcement popup, no button, on BOTH teams.
   check('announcement shows on X with expected text', (await popupText(A)) === expectText)
@@ -105,9 +107,15 @@ async function runCollision(tag, oAbility, expectText, { xPick, oPick, expectOwn
   check('no question yet during announcement', (await qCount(A)) === 0)
   await A.screenshot({ path: `${dir}/collision-${oAbility}-announce.png` })
 
-  // Popup auto-dismisses (server timer) → the SAME question opens for BOTH teams.
-  await A.waitForSelector('.qoption', { timeout: 8000 })
-  await B.waitForSelector('.qoption', { timeout: 8000 })
+  // ~5s in the popup must STILL be up with no question — i.e. it doesn't vanish in ~2s.
+  await wait(A, 5000)
+  check('popup still visible ~5s in (not vanished early)', (await popupText(A)) === expectText && (await qCount(A)) === 0)
+
+  // Popup auto-dismisses only after the full server-controlled ~9s → question opens for BOTH.
+  await A.waitForSelector('.qoption', { timeout: 14000 })
+  await B.waitForSelector('.qoption', { timeout: 14000 })
+  const heldMs = Date.now() - t0
+  check(`popup held ~9s before the question (elapsed ${(heldMs / 1000).toFixed(1)}s)`, heldMs >= 7500 && heldMs <= 11500)
   check('question auto-opened for BOTH teams', (await qCount(A)) > 0 && (await qCount(B)) > 0)
   check('announcement popup gone once question opens', (await popupText(A)) === null)
 

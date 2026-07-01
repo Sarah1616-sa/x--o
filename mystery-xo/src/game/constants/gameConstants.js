@@ -5,8 +5,9 @@ export const MAX_STAGES = 5
 
 // Same-cell ability collision (فخ-vs-فخ or فخ-vs-باور): a timed announcement popup
 // shows for this many seconds (no button) before the shared challenge question opens
-// for BOTH teams. The server may override the duration via COLLISION_ANNOUNCE_SECONDS.
-export const COLLISION_ANNOUNCE_SECONDS = 12
+// for BOTH teams. Single source of truth — the server holds the popup exactly this long,
+// and the question can't open/overlay until it elapses.
+export const COLLISION_ANNOUNCE_SECONDS = 9
 // Case A — both teams trapped the same cell.
 export const COLLISION_TEXT_A = 'فخخناها كلنا، والحين نشوف من يعرف يلعبها صح'
 // Case B — one team trapped the cell, the other used باور on it.
