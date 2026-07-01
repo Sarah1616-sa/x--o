@@ -9,6 +9,7 @@ import {
 } from '../constants/roomConstants.js'
 import { generateRoomCode } from './roomCode.js'
 import { GameEngine } from '../game/GameEngine.js'
+import { buildQuestionPool } from '../../../src/game/data/questions/index.js'
 
 function createReconnectToken() {
   return randomBytes(24).toString('hex')
@@ -58,6 +59,7 @@ function createPlayer({ playerName, socketId, team, teamSize, isHost = false }) 
     team,
     role: getPlayerRole(teamSize),
     ready: false,
+    selectedCategories: [],
     connected: true,
     isHost,
     joinedAt: Date.now(),
@@ -245,9 +247,28 @@ export class RoomManager {
       return { canStart: false, reason: 'Every connected player must be ready.' }
     }
 
+    // At least one category must be chosen across all players — the question pool is
+    // the union of everyone's picks, so an empty union has nothing to ask.
+    if (this.getSelectedCategoryUnion(room).length === 0) {
+      return { canStart: false, reason: 'يجب اختيار فئة واحدة على الأقل.' }
+    }
+
     return { canStart: true, reason: 'Match can start.' }
   }
 
+  // Union of every connected player's selected category ids (deduped).
+  getSelectedCategoryUnion(room) {
+    const ids = new Set()
+    for (const player of this.getConnectedPlayers(room)) {
+      for (const id of player.selectedCategories) {
+        ids.add(id)
+      }
+    }
+    return [...ids]
+  }
+
+  // Host-triggered manual start (kept as a fallback). The lobby now auto-starts via
+  // beginMatch() once everyone is ready, so the client no longer calls this.
   startMatch(socketId) {
     const { room, player } = this.getPlayerContextOrThrow(socketId)
 
@@ -255,6 +276,12 @@ export class RoomManager {
       throw new Error('Only the host can start the match.')
     }
 
+    return this.beginMatch(room)
+  }
+
+  // Builds the authoritative engine and flips the room into play. No host check —
+  // the "all players ready + at least one category chosen" gate is the trigger.
+  beginMatch(room) {
     if (room.phase !== ROOM_PHASES.LOBBY) {
       throw new Error('Match has already started.')
     }
@@ -269,6 +296,10 @@ export class RoomManager {
       room.teams[team].playerIds.map((id) => room.players[id]?.name).filter(Boolean)
     const rosters = { X: rosterFor('X'), O: rosterFor('O') }
 
+    // The question pool is the union of every player's selected categories (falls
+    // back to all questions if somehow empty — getMatchCanStart already guards this).
+    const questionBank = buildQuestionPool(this.getSelectedCategoryUnion(room))
+
     // Authoritative game engine — runs the full game (questions/abilities/turns)
     // over the SAME pure systems the client uses. emit() is wired by socket.js.
     // teamSizes is derived from the same filtered roster so answerer rotation and
@@ -277,6 +308,7 @@ export class RoomManager {
       maxStages: room.settings.stageCount,
       teamSizes: { X: rosters.X.length || 1, O: rosters.O.length || 1 },
       teamRosters: rosters,
+      questionBank,
     })
     room.phase = ROOM_PHASES.TURN_IDLE
     room.updatedAt = Date.now()
@@ -287,6 +319,19 @@ export class RoomManager {
   setPlayerReady(socketId, ready) {
     const { room, player } = this.getPlayerContextOrThrow(socketId)
     player.ready = ready
+    player.lastSeenAt = Date.now()
+    room.updatedAt = Date.now()
+    return room
+  }
+
+  setPlayerCategories(socketId, categoryIds) {
+    const { room, player } = this.getPlayerContextOrThrow(socketId)
+
+    if (room.phase !== ROOM_PHASES.LOBBY) {
+      throw new Error('Categories can only change in the lobby.')
+    }
+
+    player.selectedCategories = categoryIds
     player.lastSeenAt = Date.now()
     room.updatedAt = Date.now()
     return room
@@ -422,6 +467,7 @@ export class RoomManager {
           team: player.team,
           role: player.role,
           ready: player.ready,
+          selectedCategories: [...player.selectedCategories],
           connected: player.connected,
           isHost: player.isHost,
           joinedAt: player.joinedAt,

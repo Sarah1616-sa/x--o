@@ -14,6 +14,7 @@ export const SOCKET_EVENTS = {
   MATCH_START: 'match:start',
   PLAYER_READY: 'player:ready',
   PLAYER_UNREADY: 'player:unready',
+  PLAYER_SET_CATEGORIES: 'player:setCategories',
   // In-game events — names match the authoritative server (server/src/socket.js).
   // These were referenced by socketService.js but missing here, so they resolved to
   // `undefined` and the in-game sync path could never bind. Added to complete the contract.

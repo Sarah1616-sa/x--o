@@ -798,6 +798,80 @@ button {
   font-size: 0.6875rem;
   padding: 2px 8px;
 }
+
+/* ============================================================
+   category picker (lobby) — segmented-style chips + read-only tags.
+   Gold is reserved for the single Ready action, so the SELECTED chip
+   is a raised cream sticker (never gold). No animation — hard swaps.
+   ============================================================ */
+.cat-picker {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s-2);
+}
+.cat-chip {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: var(--s-2) var(--s-3);
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  /* unselected: flat + muted so it recedes */
+  background: var(--cream-2);
+  color: var(--maroon-2);
+  border: var(--stroke-w) solid var(--maroon);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+.cat-chip:active {
+  transform: translateY(var(--lift));
+  box-shadow: none;
+}
+/* selected: raised cream sticker + a leading check. The check is a ::before so the
+   button's textContent stays the bare label (keeps the smoke-test click helpers simple). */
+.cat-chip.is-selected {
+  background: var(--cream);
+  color: var(--maroon);
+  box-shadow: var(--shadow-hard);
+}
+.cat-chip.is-selected::before {
+  content: '✓';
+  font-weight: 700;
+}
+
+/* read-only category tags shown under each roster name */
+.roster__line {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.roster__row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s-2);
+}
+.cat-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cat-tag {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-meta);
+  padding: 2px 8px;
+  background: var(--cream-2);
+  color: var(--maroon-2);
+  border: 2px solid color-mix(in srgb, var(--maroon) 40%, transparent);
+  border-radius: var(--radius-pill);
+}
 .stepper {
   display: flex;
   align-items: center;
@@ -837,6 +911,7 @@ button {
     grid-template-columns: 1fr minmax(0, 460px) 1fr;
     grid-template-areas:
       "rx code ro"
+      "rx cats ro"
       "rx join ro"
       "rx set  ro";
     overflow: visible;
@@ -855,14 +930,17 @@ button {
     align-self: start;
   }
 
-  /* center column: room code, team-join row, host settings */
+  /* center column: room code, category picker, team-join row, host settings */
   .screen--room .scroll-region > .card.center {
     grid-area: code;
+  }
+  .screen--room .scroll-region > .cat-card {
+    grid-area: cats;
   }
   .screen--room .scroll-region > .row {
     grid-area: join;
   }
-  .screen--room .scroll-region > .card:not(.center) {
+  .screen--room .scroll-region > .card:not(.center):not(.cat-card) {
     grid-area: set;
   }
 

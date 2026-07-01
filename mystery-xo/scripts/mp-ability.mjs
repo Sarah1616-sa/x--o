@@ -19,8 +19,9 @@ const code = (await A.locator('.code-display').first().textContent()).trim()
 await B.goto(`${base}/?room=${code}`, { waitUntil: 'networkidle' }); await wait(B, 500)
 await B.locator('.btn--primary').first().click(); await wait(B, 400)
 await B.getByPlaceholder('أدخل اسمك').fill('سعد'); await clickText(B, 'انضمام لغرفة'); await wait(B, 1400)
-await clickText(B, 'أنا مستعد'); await wait(B, 600); await clickText(A, 'أنا مستعد'); await wait(A, 600)
-await clickText(A, 'ابدأ المباراة'); await wait(A, 1600)
+// pick a category (first chip) on both, then ready — the match auto-starts.
+await B.locator('.cat-chip').first().click(); await wait(B, 400); await A.locator('.cat-chip').first().click(); await wait(A, 400)
+await clickText(B, 'أنا مستعد'); await wait(B, 600); await clickText(A, 'أنا مستعد'); await wait(A, 1600)
 
 // host (X) arms power
 await A.locator('.abilitybar .ability').nth(0).click()

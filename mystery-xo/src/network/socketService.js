@@ -248,6 +248,10 @@ function unready() {
   emit(SOCKET_EVENTS.PLAYER_UNREADY)
 }
 
+function setCategories(ids) {
+  emit(SOCKET_EVENTS.PLAYER_SET_CATEGORIES, { categories: ids })
+}
+
 function startMatch() {
   emit(SOCKET_EVENTS.MATCH_START)
 }
@@ -318,6 +322,7 @@ export const socketService = {
   joinRoom,
   ready,
   unready,
+  setCategories,
   startMatch,
   setTeam,
   updateSettings,

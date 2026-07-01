@@ -34,10 +34,12 @@ await B.locator('.btn--primary').first().click(); await wait(B, 400)
 await B.getByPlaceholder('أدخل اسمك').fill('سعد')
 await clickText(B, 'انضمام لغرفة'); await wait(B, 1400)
 
-// ready + start
+// pick the geography category (first chip) so Q1 is the known KSA-capital question,
+// then ready. The match auto-starts once both players are ready.
+await B.locator('.cat-chip').first().click(); await wait(B, 400)
+await A.locator('.cat-chip').first().click(); await wait(A, 400)
 await clickText(B, 'أنا مستعد'); await wait(B, 700)
-await clickText(A, 'أنا مستعد'); await wait(A, 700)
-await clickText(A, 'ابدأ المباراة'); await wait(A, 1600); await wait(B, 800)
+await clickText(A, 'أنا مستعد'); await wait(A, 1600); await wait(B, 800)
 
 const boardA = await A.locator('.board').count()
 const boardB = await B.locator('.board').count()

@@ -9,9 +9,15 @@
    ============================================================ */
 import { socketService } from '../../network/socketService.js'
 import { SOCKET_EVENTS } from '../../network/socketEvents.js'
+import { CATEGORIES } from '../../game/data/questions/index.js'
 import { h, clear, screen, topbar, logo, button, field, badge, toast } from '../dom.js'
 
 const DEFAULT_MAX_PLAYERS = 8
+const CATEGORY_BY_ID = new Map(CATEGORIES.map((c) => [c.id, c]))
+const categoryLabel = (id) => {
+  const c = CATEGORY_BY_ID.get(id)
+  return c ? `${c.emoji} ${c.label}` : id
+}
 
 export function LobbyScreen(nav) {
   const root = h('div', { style: { display: 'contents' } })
@@ -111,10 +117,15 @@ export function LobbyScreen(nav) {
           if (p.ready) badges.push(badge('مستعد', { variant: 'ok' }))
           if (!p.connected) badges.push(badge('غير متصل', { variant: 'cream' }))
           const isSelf = p.playerId === selfId()
-          return h('div', { class: 'roster__row' },
+          const line = h('div', { class: 'roster__line' },
             h('span', { class: 'roster__name' }, p.name + (isSelf ? ' (أنت)' : '')),
             h('span', { class: 'roster__badges' }, ...badges),
           )
+          // Everyone sees every player's category picks live (read-only, from snapshot).
+          const cats = p.selectedCategories?.length
+            ? h('div', { class: 'cat-tags' }, ...p.selectedCategories.map((id) => h('span', { class: 'cat-tag' }, categoryLabel(id))))
+            : null
+          return h('div', { class: `roster__row${cats ? ' roster__row--stack' : ''}` }, line, cats)
         })
       : [h('div', { class: 'roster__row roster__row--empty' }, 'لا يوجد لاعبون')]
 
@@ -151,11 +162,36 @@ export function LobbyScreen(nav) {
     )
   }
 
+  // Every player picks their OWN categories (multi-select). Selections live in the
+  // snapshot, so this re-renders authoritatively on room:update — no local state.
+  function categoryPicker() {
+    const me = self()
+    const selected = new Set(me?.selectedCategories ?? [])
+    const chips = CATEGORIES.map((cat) => {
+      const on = selected.has(cat.id)
+      return h('button', {
+        class: `cat-chip${on ? ' is-selected' : ''}`,
+        type: 'button',
+        'aria-pressed': on ? 'true' : 'false',
+        onClick: () => {
+          const next = new Set(me?.selectedCategories ?? [])
+          if (next.has(cat.id)) next.delete(cat.id)
+          else next.add(cat.id)
+          socketService.setCategories([...next])
+        },
+      }, `${cat.emoji} ${cat.label}`)
+    })
+    return h('div', { class: 'card cat-card stack', style: { gap: 'var(--s-3)' } },
+      h('h2', { class: 'card__title', style: { fontSize: 'var(--fs-lead)' } }, 'فئات الأسئلة'),
+      h('span', { class: 'label', style: { margin: 0 } }, 'اختر فئاتك — تُجمع اختيارات كل اللاعبين'),
+      h('div', { class: 'cat-picker' }, ...chips),
+    )
+  }
+
   function renderRoom() {
     const me = self()
     const readyCount = playerList().filter((p) => p.ready).length
     const total = playerList().length
-    const host = isHost()
 
     const shareUrl = buildShareUrl(room.roomCode)
     const codeCard = h('div', { class: 'card center stack', style: { gap: 'var(--s-3)' } },
@@ -182,18 +218,17 @@ export function LobbyScreen(nav) {
       }),
     )
 
-    // one gold action: host -> start; non-host -> ready
+    // The match auto-starts when everyone is ready and at least one category is
+    // chosen overall, so Ready is the SINGLE gold action for every player.
+    const anyCategory = playerList().some((p) => p.selectedCategories?.length)
     const readyBtn = button(me?.ready ? 'إلغاء الاستعداد' : 'أنا مستعد', {
-      variant: host ? 'secondary' : 'primary',
+      variant: 'primary',
       onClick: () => (me?.ready ? socketService.unready() : socketService.ready()),
     })
-    const startBtn = host
-      ? button('ابدأ المباراة', { variant: 'primary', onClick: () => socketService.startMatch() })
-      : null
 
     const actions = h('div', { class: 'stack' },
       h('p', { class: 'roomhint' }, `${readyCount}/${total} مستعدون`),
-      startBtn,
+      anyCategory ? null : h('p', { class: 'roomhint' }, 'اختر فئة واحدة على الأقل للبدء'),
       readyBtn,
     )
 
@@ -207,6 +242,7 @@ export function LobbyScreen(nav) {
       ),
       body: h('div', { class: 'scroll-region stack', style: { gap: 'var(--s-4)' } },
         codeCard,
+        categoryPicker(),
         teams,
         joinRow,
         hostSettings(),

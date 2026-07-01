@@ -1,5 +1,5 @@
 import { roomManager } from './rooms/roomManager.js'
-import { validateMaxPlayers, validatePlayerName, validateRoomCode, validateRoomSettingsPatch } from './validators/roomValidators.js'
+import { validateCategoryIds, validateMaxPlayers, validatePlayerName, validateRoomCode, validateRoomSettingsPatch } from './validators/roomValidators.js'
 
 function emitSocketError(socket, event, message) {
   socket.emit(event, {
@@ -32,6 +32,27 @@ function broadcastGameSnapshot(io, room) {
     room: snapshot,
     game: snapshot.game,
   })
+}
+
+// Kicks off a room whose engine has already been built (by beginMatch/startMatch):
+// wire the engine broadcaster, announce the transition, then start its timers.
+function launchMatch(io, room) {
+  room.engine.emit = () => broadcastGameSnapshot(io, room)
+  io.to(room.roomCode).emit('match:starting', {
+    phase: room.phase,
+    room: roomManager.buildRoomSnapshot(room),
+  })
+  broadcastRoomUpdate(io, room)
+  room.engine.start()
+}
+
+// Auto-start trigger: once everyone is ready and at least one category is chosen
+// overall, build the engine and launch. No-op otherwise.
+function maybeAutoStart(io, room) {
+  if (roomManager.getMatchCanStart(room).canStart) {
+    roomManager.beginMatch(room)
+    launchMatch(io, room)
+  }
 }
 
 export function registerSocketHandlers(io) {
@@ -85,6 +106,7 @@ export function registerSocketHandlers(io) {
       try {
         const room = roomManager.setPlayerReady(socket.id, true)
         broadcastRoomUpdate(io, room)
+        maybeAutoStart(io, room)
       } catch (error) {
         emitSocketError(socket, 'action:error', error.message)
       }
@@ -94,6 +116,16 @@ export function registerSocketHandlers(io) {
       try {
         const room = roomManager.setPlayerReady(socket.id, false)
         broadcastRoomUpdate(io, room)
+      } catch (error) {
+        emitSocketError(socket, 'action:error', error.message)
+      }
+    })
+
+    socket.on('player:setCategories', (payload = {}) => {
+      try {
+        const room = roomManager.setPlayerCategories(socket.id, validateCategoryIds(payload.categories))
+        broadcastRoomUpdate(io, room)
+        maybeAutoStart(io, room)
       } catch (error) {
         emitSocketError(socket, 'action:error', error.message)
       }
@@ -133,14 +165,7 @@ export function registerSocketHandlers(io) {
     socket.on('match:start', () => {
       try {
         const room = roomManager.startMatch(socket.id)
-        // wire the engine's broadcaster (also drives its internal question/stage timers)
-        room.engine.emit = () => broadcastGameSnapshot(io, room)
-        io.to(room.roomCode).emit('match:starting', {
-          phase: room.phase,
-          room: roomManager.buildRoomSnapshot(room),
-        })
-        broadcastRoomUpdate(io, room)
-        room.engine.start()
+        launchMatch(io, room)
       } catch (error) {
         emitSocketError(socket, 'action:error', error.message)
       }

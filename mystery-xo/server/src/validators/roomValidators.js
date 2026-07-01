@@ -1,4 +1,7 @@
 import { MAX_ROOM_PLAYERS, MIN_ROOM_PLAYERS } from '../constants/roomConstants.js'
+import { CATEGORY_IDS } from '../../../src/game/data/questions/index.js'
+
+const VALID_CATEGORY_IDS = new Set(CATEGORY_IDS)
 
 function normalizePlayerName(playerName) {
   return typeof playerName === 'string' ? playerName.trim() : ''
@@ -62,6 +65,29 @@ export function validateQuestionCategory(questionCategory) {
   }
 
   return normalizedCategory
+}
+
+export function validateCategoryIds(categories) {
+  if (!Array.isArray(categories)) {
+    throw new Error('Categories must be an array.')
+  }
+
+  const normalized = []
+  const seen = new Set()
+
+  for (const id of categories) {
+    if (typeof id !== 'string') {
+      throw new Error('Category ids must be strings.')
+    }
+
+    // Silently drop unknown ids and duplicates so a stale client can't wedge the room.
+    if (VALID_CATEGORY_IDS.has(id) && !seen.has(id)) {
+      seen.add(id)
+      normalized.push(id)
+    }
+  }
+
+  return normalized
 }
 
 function isHexColor(value) {

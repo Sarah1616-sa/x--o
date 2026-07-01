@@ -30,8 +30,8 @@ function emptyBoard() {
 
 export class GameEngine {
   // emit(): broadcast the current snapshot to the room (wired by socket.js).
-  constructor({ maxStages = MAX_STAGES, teamSizes = { X: 1, O: 1 }, teamRosters = { X: [], O: [] }, emit = () => {} } = {}) {
-    this.questionSystem = new QuestionSystem({ questionBank: QUESTION_BANK, questionTimeLimit: QUESTION_TIME_LIMIT })
+  constructor({ maxStages = MAX_STAGES, teamSizes = { X: 1, O: 1 }, teamRosters = { X: [], O: [] }, questionBank = QUESTION_BANK, emit = () => {} } = {}) {
+    this.questionSystem = new QuestionSystem({ questionBank, questionTimeLimit: QUESTION_TIME_LIMIT })
     this.matchSystem = new MatchSystem({ maxStages })
     this.abilitySystem = new AbilitySystem()
     this.turnResolver = new TurnResolver({
